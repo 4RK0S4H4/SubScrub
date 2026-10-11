@@ -1,6 +1,7 @@
 # Tests and the Windows build, on GitHub's Windows machines.
 #   - every push and pull request: run the tests, build SubScrub.exe, attach it to the run as an artifact
 #   - a tag like v2.7.3: also publish a GitHub Release with SubScrub.exe (the user downloads from there)
+#   - "Run workflow" on main with a version typed in (e.g. 2.7.3): does the same and creates the tag itself
 name: build
 
 on:
@@ -9,6 +10,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Publish a Release for this version (e.g. 2.7.3). Must match subscrub/__init__.py. Leave empty to only build."
+        required: false
+        default: ""
 
 permissions:
   contents: write          # needed to create releases on tags
@@ -59,9 +65,19 @@ jobs:
           name: SubScrub-exe
           path: dist/SubScrub.exe
 
+      - name: Check the version matches before releasing
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Releases can only be started from main" }
+          $v = python -c "import subscrub; print(subscrub.__version__)"
+          if ($v.Trim() -ne "${{ inputs.version }}") { throw "Typed version ${{ inputs.version }} does not match subscrub/__init__.py ($v)" }
+
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: dist/SubScrub.exe
           generate_release_notes: true

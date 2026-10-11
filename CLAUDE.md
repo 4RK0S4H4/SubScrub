@@ -62,9 +62,11 @@ build.bat                                                       # local Windows 
 ```
 
 CI: `.github/workflows/build.yml` runs the tests and builds `SubScrub.exe` on `windows-latest` for every push and
-PR (the exe is attached to the run). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe. To ship
-a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then tag `vX.Y.Z` and push
-the tag.
+PR (the exe is attached to the run). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
+To ship a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then start the
+`build` workflow on main with the version typed in (Actions, "Run workflow", or the `actions_run_trigger` tool).
+It checks the version matches `__init__.py`, creates the tag and publishes the Release. (Cloud Claude Code sessions
+can't push tags, so don't try `git push` of a tag.)
 
 ## Layout
 

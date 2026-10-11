@@ -2,6 +2,11 @@
 
 Decisions waiting on the user are marked **(ask)**. Everything else can be done when the user says go.
 
+Decided by the user (2026-10-11): releases are started with the workflow's "Run workflow" button (cloud sessions
+can't push tags); the installer does not install FFmpeg/MKVToolNix (the app's install buttons stay); updates show a
+banner and the user clicks Update (no automatic download); no code signing, the user clicks "Run anyway" once per
+version. Still open: the local AI check.
+
 ## Next up: install and update (the user's stated priority)
 
 Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Python and builds the exe) and runs
