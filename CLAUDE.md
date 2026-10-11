@@ -11,26 +11,36 @@ Current version: see `subscrub/__init__.py` (2.7.3 at hand-off). The history of 
 
 ## How we work together
 
-The user is the product manager. You are the whole development team.
+Follows the S4 Studio skill (load it with the Skill tool if it's available; its rules win over this summary when
+they differ, except where this file says SubScrub is a desktop app). The user is the product manager. You are the
+whole development team.
 
 - **The user describes, you execute.** They give features and bugs in plain English, often with a phone screenshot.
   You do all coding, installing, building, testing, committing, merging and releasing. Never ask them to run
   commands, install anything or edit files.
+- **Backlog first, then "go".** When they say "log it", "add to the list", or ask you not to execute yet, file each
+  request or bug as a GitHub issue (`bug` / `enhancement`), reply with the links, and stop. Don't build, test or
+  screenshot while only logging. They decide when and what to tackle. When they say "go" or "do the batch"
+  (or name specific issues), do exactly those in one branch and PR, run the checks once, merge, close the issues
+  and send the release link. They also say when to release.
 - **Branch, PR, merge yourself.** Work on a branch, open a PR and let the `build` workflow pass. Small verified
-  changes you merge without asking. After a release, give them the GitHub Release link. That is where they
-  download `SubScrub.exe` (it replaces the old "run build.bat" step).
-- **Backlog and batching.** When they say "log it", "add to the list", or ask you not to execute yet, file each
-  request or bug as a GitHub issue (`bug` / `enhancement`), reply with the links, and stop. When they say "go" or
-  "do the batch", do every open issue in one branch and PR, run the checks once, merge, close the issues and send
-  the release link.
+  changes you merge without asking. SubScrub is a Windows desktop app, so there is no GitHub Pages link: after a
+  release, give them the GitHub Release link (that is where they download `SubScrub.exe`).
 - **Ask before deciding what's theirs to decide.** Cleaning rules, naming formats and anything that changes their
   files are confirmed with them and recorded in `docs/OPEN-ITEMS.md`. Never silently change a rule below.
+  Ask with the multiple-choice question tool when there is one: a short round (at most four questions), the
+  recommended option first and marked "(Recommended)". No open-ended "anything else?" questions.
+- **Don't interview for small things.** For a bug, a button or a new field, match what's there and do it. Ask one
+  question only if the change is genuinely ambiguous. A new feature or redesign gets one short round of questions.
 - **Short, plain-language replies.** Say what changed, what they need to do (usually nothing) and the link. Say
-  honestly what wasn't verified, for example "not run on a real Windows PC" or "TMDB not called for real".
-- **When feedback says "not quite", change only that.** Keep everything else stable.
-- **Design work follows the user's S4 Studio skill** (load it if it's available in this session). The look is
-  already decided (see "Look" below). For colour questions, publish a switchable HTML sample instead of static
-  images. Every sample page must work on a phone.
+  honestly what wasn't verified, for example "not run on a real Windows PC" or "TMDB not called for real". End a
+  hand-over with 2-3 concrete next-step options they can pick from.
+- **When feedback says "not quite", change only that.** Keep everything else stable and say exactly what changed.
+  If a tweak goes the wrong way (too bright, too strong), move halfway back rather than swinging to the other
+  extreme.
+- **Design work follows the S4 Studio skill.** The look is already decided (see "Look" below). For colour
+  questions, publish a switchable HTML sampler (from the skill) instead of static images, with the app's real
+  screen as the mock. Every sample page must work on a phone (390px wide, no sideways scroll, 40px touch targets).
 
 ## Commands
 
@@ -52,9 +62,11 @@ build.bat                                                       # local Windows 
 ```
 
 CI: `.github/workflows/build.yml` runs the tests and builds `SubScrub.exe` on `windows-latest` for every push and
-PR (the exe is attached to the run). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe. To ship
-a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then tag `vX.Y.Z` and push
-the tag.
+PR (the exe is attached to the run). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
+To ship a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then start the
+`build` workflow on main with the version typed in (Actions, "Run workflow", or the `actions_run_trigger` tool).
+It checks the version matches `__init__.py`, creates the tag and publishes the Release. (Cloud Claude Code sessions
+can't push tags, so don't try `git push` of a tag.)
 
 ## Layout
 
@@ -109,13 +121,24 @@ the tag.
 ## Screenshots and the visual check (do this for any UI change)
 
 1. `python tools/ui_screenshots.py screenshots/ <video folder> dark` and again with `light`. It uses a throwaway
-   settings file, so the user's real settings and TMDB key are never touched.
-2. Open every image at full size and check for: clipped or overlapping text, odd spacing inside words, badges
-   stretched across a column, square corners on pills, repeated messages, cards stretched over empty space,
-   greyed-out leftover buttons, low-contrast text in dark mode, wrong capitalisation, missing icons.
-3. Fix what you find and capture again. Send the user separate 1920×1080 images, one screen per file, named like
-   `03-review-dark.png`. Never combine screens into one image. Show dialogs over the dimmed window.
-4. Say what the check found. The native title bar, Mica and DPI scaling can't be seen offscreen, so say so.
+   settings file, so the user's real settings and TMDB key are never touched. Use realistic content (real-looking
+   file names and numbers, and a few states: ready, needs attention, done), not an empty shell.
+2. Open every image at full size and check for: clipped or overlapping text (including the last row of a list or
+   the edge of a scroll area), odd spacing inside words or numbers, digits that don't look like Inter's (open 4, 6
+   and 9, flat-top 3), badges stretched across a column, square corners on pills, repeated messages, cards
+   stretched over empty space, greyed-out leftover buttons, labels that contradict the badge next to them,
+   accent colour on things that don't need attention, inconsistent alignment or corner radii, low-contrast text in
+   dark mode, wrong capitalisation (a capital after a comma, Title Case headings), stray punctuation, missing icons.
+3. Fix what you find and capture again, at most two rounds. Send the user separate 1920×1080 images, one screen per
+   file, named like `03-review-dark.png`. Never combine screens into one image or shrink a screen to fit more in.
+   Show dialogs composited over the dimmed window.
+4. Say in a line or two what the check found and fixed. The native title bar, Mica and DPI scaling can't be seen
+   offscreen, so say so. Never claim a check you didn't do.
+
+Layout rules from the skill that apply here: one primary (accent-filled) button per area, hiding it when there's
+nothing to do; global top-bar actions stay in the same place on every screen (disable, don't remove); headings and
+card titles in sentence case (all-caps only for tiny group labels); headers stay uncluttered, with counts as quiet
+secondary text; say a hint once, not on every row; cards fit their content.
 
 ## Data and privacy
 
