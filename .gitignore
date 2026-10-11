@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Test media and screenshots: never commit real videos or subtitles (copyrighted, and large)
+samples/
+media/
+screenshots/
+shots/
+*.mkv
+*.mp4
+*.m4v
+*.webm
+*.mov
+*.sup
+*.sub
+*.idx
+!tests/fixtures/*.srt
+!tests/fixtures/*.ass
+
+# Local tools and secrets
+tools/bin/
+.env
+*.log
+_settings.ini
+
+# OS / editors
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

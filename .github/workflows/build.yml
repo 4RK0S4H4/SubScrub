@@ -1,0 +1,67 @@
+# Tests and the Windows build, on GitHub's Windows machines.
+#   - every push and pull request: run the tests, build SubScrub.exe, attach it to the run as an artifact
+#   - a tag like v2.7.3: also publish a GitHub Release with SubScrub.exe (the user downloads from there)
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed to create releases on tags
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pillow
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m tests.test_cleaner
+          python -m tests.test_batch
+          python -m tests.test_naming
+          python -m tests.test_swap
+          python -m tests.test_library
+
+      # tests.test_pipeline needs ffmpeg + MKVToolNix and a folder of sample videos; see docs/OPEN-ITEMS.md.
+
+      - name: Build SubScrub.exe
+        run: >
+          python -m PyInstaller --noconfirm --clean --log-level WARN --onefile --windowed
+          --name SubScrub --icon assets\subscrub.ico --hidden-import PySide6.QtSvg --exclude-module tkinter run.py
+
+      - name: Smoke-test the exe starts
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\SubScrub.exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "SubScrub.exe exited straight away (code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SubScrub-exe
+          path: dist/SubScrub.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SubScrub.exe
+          generate_release_notes: true
