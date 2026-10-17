@@ -24,6 +24,9 @@ whole development team.
   screenshot while only logging. They decide when and what to tackle. When they say "go" or "do the batch"
   (or name specific issues), do exactly those in one branch and PR, run the checks once, merge, close the issues
   and send the release link. They also say when to release.
+- **"future plan" issues are never part of a batch.** An issue labelled `future plan` is an idea to discuss and
+  design, not work to do. "Go" on all open issues, "do the batch" and similar skip it. Only build one when the user
+  names it and says to build it.
 - **Branch, PR, merge yourself.** Work on a branch, open a PR and let the `build` workflow pass. Small verified
   changes you merge without asking. SubScrub is a Windows desktop app, so there is no GitHub Pages link: after a
   release, give them the GitHub Release link (that is where they download `SubScrub.exe`).
