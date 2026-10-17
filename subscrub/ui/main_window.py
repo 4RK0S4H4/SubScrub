@@ -1381,8 +1381,6 @@ class MainWindow(QMainWindow):
         if tr.external and self.video_mode != "sidecar":
             bits.append("goes into the video" + (" and the .srt is removed" if self.recycle_sub
                                                   and self.video_mode == "replace" and not self.keep_sdh else ""))
-        if batch.plain_pick(it, tr):
-            bits.append("regular track becomes the default, SDH track kept")
         if it.opts is not None:
             bits.append("custom edits")
         if tidy:
@@ -1482,9 +1480,18 @@ class MainWindow(QMainWindow):
         note = self.add_note
         self.add_note_label.setText(note[:1].upper() + note[1:])
         self.add_note_label.setVisible(bool(note))
+        pending = [i for i in self.items if i.pending and i.loaded and i.track() is not None]
+        plain = sum(1 for i in pending if batch.plain_pick(i, i.track()))
+        if self.keep_sdh or plain == len(pending) and plain:
+            sdh_note = " and the SDH track is kept"
+        elif plain:
+            sdh_note = (". Files with a regular English track clean that one and keep the SDH track; "
+                        "otherwise the SDH track is dropped")
+        else:
+            sdh_note = " and the SDH track is dropped"
         how = {"replace": "Saving replaces each original, which goes to the Recycle Bin once the new file checks out. "
                           f"The cleaned track {'becomes the default' if self.make_default else 'is added'}"
-                          f"{' and the SDH track is kept' if self.keep_sdh else ' and the SDH track is dropped'}.",
+                          f"{sdh_note}.",
                "new": "Saving makes a new “.dialogue” copy next to each video.",
                "sidecar": "Saving writes a cleaned .srt next to each video."}[self.video_mode]
         if self.recycle_sub and self.video_mode == "replace" and any(i.sidecars for i in self.items):

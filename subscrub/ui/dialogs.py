@@ -436,7 +436,7 @@ class SettingsDialog(GlassDialog):
         keep, default = self.keep_row.isChecked(), self.default_row.isChecked()
         if m == "replace":
             t = (f"Rewrites the video with the cleaned track{' as the default' if default else ''}"
-                 f"{', keeping the SDH track as a backup' if keep else ' in place of the SDH track'}. "
+                 f"{', keeping the SDH track as a backup' if keep else ' in place of the SDH track (a regular English track is cleaned instead when there is one, and the SDH track stays)'}. "
                  "The new file is checked before the old one goes to the Recycle Bin.")
         elif m == "new":
             t = "Saves “Movie.dialogue.mkv” next to the original, which isn't touched."
