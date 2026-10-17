@@ -23,7 +23,8 @@ FIX = ROOT / "tests" / "fixtures"
 
 def _runner(tools):
     kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    return lambda cmd: subprocess.run(cmd, check=True, **kw)
+    # no stdin (a tool waiting for a key press would hang a CI run) and a limit, so a stuck tool is an error
+    return lambda cmd: subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL, timeout=180, **kw)
 
 
 def main():
@@ -94,7 +95,7 @@ def pipeline_samples(tools, out: Path) -> tuple[Path, Path]:
 
 def _tiny_video(run, tools, out: Path, subs: list[tuple[Path, str, str, str]], seconds: int = 20):
     """A short black-frame MKV with subtitle tracks (file, language, title, disposition); none when `subs` is empty."""
-    cmd = [tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+    cmd = [tools.ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
            f"color=c=black:s=160x90:r=1:d={seconds}", "-f", "lavfi", "-i", f"anullsrc=r=8000:cl=mono:d={seconds}"]
     for f, *_ in subs:
         cmd += ["-i", str(f)]
@@ -137,8 +138,10 @@ def edge_cases(tools, out: Path) -> dict[str, Path]:
         return p
 
     make("no subtitles", [])
+    sdh2 = tmp / "sdh2.srt"                      # a separate file: the same one opened twice stalls FFmpeg on Windows
+    shutil.copy(sdh, sdh2)
     make("two sdh", [(sdh, "eng", "English SDH", "default+hearing_impaired"),
-                     (sdh, "eng", "English (HI)", "hearing_impaired")])
+                     (sdh2, "eng", "English (HI)", "hearing_impaired")])
     all_sdh = tmp / "all.srt"
     _cues(all_sdh, ["[door creaks]", "(sighs)", "[phone buzzing]", "♪♪", "[music fades]"])
     make("every line is sdh", [(all_sdh, "eng", "English SDH", "default+hearing_impaired")])
