@@ -1330,12 +1330,12 @@ class MainWindow(QMainWindow):
         res = it.result
         if res is None:
             return label_, "", "", True
-        if not it.force and not tr.external and not batch.is_sdh(it, tr):
+        if not it.force and not batch.auto_cleaned(it, tr):
             if has_tidy:
                 return f"{label_}: regular subtitles" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
             return f"{label_}: regular subtitles, nothing to strip", "No SDH", "dim", True
         n = final_changed(res)
-        if n == 0 and not tr.external:
+        if n == 0 and not tr.external and not batch.plain_to_default(it, tr):
             if has_tidy:
                 return f"{label_}: nothing to remove" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
             return f"{label_}: nothing to remove", "Already Clean", "dim", True
@@ -1347,6 +1347,8 @@ class MainWindow(QMainWindow):
         if tr.external and self.video_mode != "sidecar":
             bits.append("goes into the video" + (" and the .srt is removed" if self.recycle_sub
                                                   and self.video_mode == "replace" and not self.keep_sdh else ""))
+        if batch.plain_pick(it, tr):
+            bits.append("regular track becomes the default, SDH track kept")
         if it.opts is not None:
             bits.append("custom edits")
         if tidy:
@@ -1368,7 +1370,7 @@ class MainWindow(QMainWindow):
         tr = it.track()
         if it.result is None or it.state not in ("ready", "failed", "skipped") or tr is None:
             return ""
-        if not it.force and not tr.external and not batch.is_sdh(it, tr):
+        if not it.force and not batch.auto_cleaned(it, tr):
             return ""                                 # regular subtitles are skipped when saving: nothing is cleaned
         n = final_changed(it.result)
         return f"{n:,} to clean" if n else ""
@@ -1618,6 +1620,8 @@ class MainWindow(QMainWindow):
                         c.set_stat(f"{plural(n, 'sound or name note')}", "accent" if tr.index == it.sel else "")
                     elif tr.index == plain:
                         c.set_stat("Regular, used as a cross-check", "dim")
+                    elif tr.index == it.sel and batch.plain_pick(it, tr):
+                        c.set_stat("Regular, becomes the default", "accent")
                     else:
                         c.set_stat("Regular subtitles", "dim")
                 c.set_selected(tr.index == it.sel)
@@ -1677,7 +1681,7 @@ class MainWindow(QMainWindow):
         self.prev_file.setVisible(multi)
         self.next_file.setVisible(multi)
         tr = it.track()
-        nosdh = bool(tr) and it.loaded and not it.force and not tr.external and not batch.is_sdh(it, tr)
+        nosdh = bool(tr) and it.loaded and not it.force and not batch.auto_cleaned(it, tr)
         self.nosdh_wrap.setVisible(nosdh)
         self.preview.set_preview_only(nosdh)
         if nosdh:
@@ -1711,7 +1715,7 @@ class MainWindow(QMainWindow):
                 if new != other.sel:
                     other.sel, other.overrides = new, {}
                     self._queue_recalc(other)
-        it.force = bool(tr) and not tr.external and not batch.is_sdh(it, tr)   # picked a regular track on purpose
+        it.force = bool(tr) and not batch.auto_cleaned(it, tr)   # picked a regular track on purpose
         self._compute_result(it)
         self._update_row(it)
         self.show_review(it.uid)
@@ -1997,7 +2001,7 @@ class MainWindow(QMainWindow):
             return
         loaded = [i for i in scope if i.state == "ready" and i.result is not None]
         unseen = [i for i in scope if i.state in ("queued", "probing", "reading")]
-        sdh_ok = lambda i: i.force or (i.track() is not None and (bool(i.track().external) or batch.is_sdh(i, i.track())))
+        sdh_ok = lambda i: i.force or (i.track() is not None and batch.auto_cleaned(i, i.track()))
         flagged = [i for i in loaded if sdh_ok(i) and i.result.unresolved()]
         single = len(scope) == 1
 

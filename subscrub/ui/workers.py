@@ -124,7 +124,7 @@ class BatchWorker(QThread):
                 if track is None or it.sel not in it.docs:
                     self._tidy_or_skip(it, uid, tidy, "no text subtitles", prog)
                     continue
-                if not job["force"] and not track.external and not batch.is_sdh(it, track):
+                if not job["force"] and not batch.auto_cleaned(it, track):
                     self._tidy_or_skip(it, uid, tidy, "no SDH subtitles (regular subtitles only)", prog)
                     continue
                 res = batch.clean_item(it, cfg["opts"])
@@ -138,14 +138,16 @@ class BatchWorker(QThread):
                         for i in unresolved:
                             res.overrides[i] = "orig"
                 n = final_changed(res)
-                if n == 0 and not job["force"] and not track.external:
+                if n == 0 and not job["force"] and not track.external and not batch.plain_to_default(it, track):
                     self._tidy_or_skip(it, uid, tidy, "already clean", prog)
                     continue
                 mode = cfg["video_mode"] if it.kind == "video" else cfg["sub_mode"]
                 note = ""
                 if it.kind == "subtitle" and mode == "embed" and not it.info.companion:
                     mode, note = "new", " (no matching video, so saved as a subtitle file)"
-                opts = media.SaveOptions(mode=mode, keep_original=cfg["keep"], make_default=cfg["default"],
+                # a plain track that was cleaned is replaced by its cleaned copy; the SDH track is what stays
+                keep = cfg["keep"] and not batch.plain_pick(it, track)
+                opts = media.SaveOptions(mode=mode, keep_original=keep, make_default=cfg["default"],
                                          track_name=cfg["name"] or "", language=track.language,
                                          overwrite_sidecar=cfg["overwrite"], recycle_source_sub=cfg["recycle"],
                                          recycle_paths=batch.removable_sidecars(it, cfg["keep"], mode)

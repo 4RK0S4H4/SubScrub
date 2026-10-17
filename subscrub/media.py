@@ -301,6 +301,7 @@ class MediaInfo:
     streams: list[dict]
     subs: list[SubTrack]
     companion: str | None = None      # standalone subtitle file: the video it belongs to
+    chapters: int = 0
 
     @property
     def name(self) -> str:
@@ -459,7 +460,7 @@ def probe(tools: Tools, path: str, log: Log | None = None) -> MediaInfo:
     if not tools.ffprobe:
         raise ToolError("FFprobe was not found. Install FFmpeg first.")
     out = run_capture([tools.ffprobe, "-v", "error", "-print_format", "json",
-                       "-show_format", "-show_streams", path], log, timeout=120)
+                       "-show_format", "-show_streams", "-show_chapters", path], log, timeout=120)
     data = json.loads(out or "{}")
     streams = data.get("streams", [])
     fmt = data.get("format", {})
@@ -486,7 +487,8 @@ def probe(tools: Tools, path: str, log: Log | None = None) -> MediaInfo:
     except ValueError:
         duration = 0.0
     size = int(fmt.get("size") or 0) or os.path.getsize(path)
-    return MediaInfo(path, container_kind(path), fmt.get("format_name", ""), duration, size, streams, subs)
+    return MediaInfo(path, container_kind(path), fmt.get("format_name", ""), duration, size, streams, subs,
+                     chapters=len(data.get("chapters") or []))
 
 
 # ============================================================================ extraction
@@ -910,7 +912,8 @@ def _remux(tools, info, track, text, fmt, opts, lang, name, on_progress, cancel,
         if on_progress:
             on_progress(-1, "Checking the new file")
         expected = len(info.subs) + (1 if sub_path else 0) - len(drop)
-        _verify(tools, info, str(work), expected, log)
+        _verify(tools, info, str(work), expected, log, new_text=text if sub_path else None, fmt=fmt,
+                new_hint=(lang, name))
     except BaseException:
         try:
             if work.exists():
@@ -1100,7 +1103,35 @@ def _mux_ffmpeg(tools, info, track, drop, sub_path, out, lang, name, opts, on_pr
     run_stream(cmd, _ffmpeg_progress(info.duration, on_progress, "Writing new file"), log, cancel)
 
 
-def _verify(tools: Tools, before: MediaInfo, out: str, expected_subs: int, log: Log | None):
+def _new_track_cues(tools: Tools, after: MediaInfo, out: str, fmt: str, hint: tuple, log: Log | None) -> int | None:
+    """How many cues the new file's cleaned track has (None when that track can't be told apart from the others).
+    The track is found by the tag SubScrub writes, or else by its language and name."""
+    from . import subformats
+    lang, name = hint
+    mine = [t for t in after.subs if t.text_based and t.cleaned]
+    if not mine:
+        mine = [t for t in after.subs if t.text_based and lang_short(t.language) == lang_short(lang)
+                and (t.title or "").strip().lower() == name.strip().lower()]
+    if not mine:
+        return None
+    tmp = tempfile.mkdtemp(prefix="subscrub_verify_")
+    try:
+        paths = extract_subs(tools, after, mine, tmp, None, None, log)
+        counts = []
+        for t in mine:
+            if t.index in paths:
+                counts.append(len(subformats.load(paths[t.index], t.fmt).cues))
+        # an earlier cleaned track kept next to this one is another candidate: the new one is the best match
+        return max(counts) if counts else 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _verify(tools: Tools, before: MediaInfo, out: str, expected_subs: int, log: Log | None,
+            new_text: str | None = None, fmt: str = "srt", new_hint: tuple | None = None):
+    """Decide whether the new file is good enough to replace the original. Checks the track counts, duration, size,
+    and (for MKV) the attachments such as ASS fonts, the chapters, and that the new subtitle track really holds
+    the cleaned lines."""
     if not os.path.exists(out) or os.path.getsize(out) == 0:
         raise ToolError("The new file wasn't written.")
     after = probe(tools, out, log)
@@ -1114,11 +1145,27 @@ def _verify(tools: Tools, before: MediaInfo, out: str, expected_subs: int, log: 
         problems.append(f"duration changed ({before.duration:.1f}s → {after.duration:.1f}s)")
     if before.size and after.size < before.size * 0.5:
         problems.append("the new file is much smaller than the original")
+    if after.kind == "mkv" and after.count("attachment") < before.count("attachment"):
+        problems.append(f"attached files (such as fonts) were lost ({before.count('attachment')} → "
+                        f"{after.count('attachment')})")
+    if after.chapters != before.chapters:
+        problems.append(f"chapters changed ({before.chapters} → {after.chapters})")
+    cues = None
+    if not problems and new_text is not None and new_hint is not None:
+        from . import subformats
+        want = len(subformats.parse(new_text, fmt).cues)
+        cues = _new_track_cues(tools, after, out, fmt, new_hint, log)
+        if cues is None:
+            if log:
+                log("Couldn't tell which subtitle track in the new file is the cleaned one; skipped the line count.")
+        elif cues < want * 0.98 - 1:
+            problems.append(f"the cleaned subtitle track has {cues} lines instead of {want}")
     if problems:
         raise ToolError("The new file didn't pass checks, so nothing was replaced: " + "; ".join(problems))
     if log:
         log(f"Verified {os.path.basename(out)}: {after.count('video')} video, {after.count('audio')} audio, "
-            f"{len(after.subs)} subtitle tracks, {after.duration:.1f}s.")
+            f"{len(after.subs)} subtitle tracks, {after.count('attachment')} attachments, {after.chapters} chapters, "
+            f"{after.duration:.1f}s" + (f", {cues} cleaned lines." if cues is not None else "."))
 
 
 def open_in_explorer(path: str):

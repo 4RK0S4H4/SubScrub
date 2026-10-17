@@ -22,10 +22,56 @@ def item_with(tracks, texts):
     return it
 
 
-def test_picks_sdh_in_default_language():
+def test_picks_the_plain_track_in_the_default_language():
+    # the plain English track wins over the SDH one (#20); Spanish is never considered when English exists
     it = item_with([track(2, 0, "eng", "English", default=True), track(3, 1, "eng", "English SDH"),
                     track(4, 2, "spa", "Spanish SDH")], [PLAIN, SDH, SDH])
+    assert batch.pick_track(it, None) == 2
+    # with only SDH tracks in English, the SDH one is picked
+    it = item_with([track(3, 0, "eng", "English SDH", default=True), track(4, 1, "spa", "Spanish")], [SDH, PLAIN])
     assert batch.pick_track(it, None) == 3
+
+
+def test_prefers_the_plain_track():
+    it = item_with([track(2, 0, "eng", "English SDH"), track(3, 1, "eng", "English", default=True),
+                    track(4, 2, "spa", "Spanish")], [SDH, PLAIN, PLAIN])
+    assert batch.pick_track(it, None) == 3
+    assert batch.plain_pick(it, it.info.subs[1]) and batch.auto_cleaned(it, it.info.subs[1])
+    assert batch.plain_partner(it) is None or it.sel is None      # nothing to cross-check a plain track against
+    it.sel = 3
+    assert batch.plain_partner(it) is None
+    assert not batch.plain_to_default(it, it.info.subs[1])        # already the default
+    it2 = item_with([track(2, 0, "eng", "English SDH", default=True), track(3, 1, "eng", "English")], [SDH, PLAIN])
+    assert batch.pick_track(it2, None) == 3 and batch.plain_to_default(it2, it2.info.subs[1])
+
+
+def test_plain_only_and_sdh_only_behave_as_before():
+    only_plain = item_with([track(2, 0, "eng", "English", default=True)], [PLAIN])
+    assert batch.pick_track(only_plain, None) == 2
+    assert not batch.plain_pick(only_plain, only_plain.info.subs[0])
+    assert not batch.auto_cleaned(only_plain, only_plain.info.subs[0])     # skipped on save, as today
+    only_sdh = item_with([track(2, 0, "eng", "English SDH", default=True), track(3, 1, "spa", "Spanish")],
+                         [SDH, PLAIN])
+    assert batch.pick_track(only_sdh, None) == 2 and batch.auto_cleaned(only_sdh, only_sdh.info.subs[0])
+
+
+def test_hand_pick_of_the_sdh_track_wins():
+    pref = batch.pref_from(track(9, 0, "eng", "English SDH", hi=True))
+    it = item_with([track(2, 0, "eng", "English SDH"), track(3, 1, "eng", "English", default=True)], [SDH, PLAIN])
+    assert batch.pick_track(it, pref) == 2
+
+
+def test_sidecars_kept_when_plain_is_cleaned():
+    d = tempfile.mkdtemp()
+    it = item_with([track(2, 0, "eng", "English", default=True)], [PLAIN])
+    it.path = os.path.join(d, "x.mkv")
+    sdh_side = media.SubTrack(10, 1, "subrip", "eng", "", False, False, True, {}, external=os.path.join(d, "x.en.sdh.srt"))
+    it.sidecars = [sdh_side]
+    it.docs[10] = sf.parse(SDH, "srt")
+    batch.measure(it)
+    it.sel = 2
+    assert batch.plain_pick(it, it.track())
+    assert batch.removable_sidecars(it, False, "replace") == []     # the SDH file stays
 
 
 def test_preference_carries_over():
@@ -110,9 +156,11 @@ def test_embedded_sdh_plus_redundant_srt():
     batch.attach_sidecars(it)
     batch.measure(it)
     it.sel = batch.pick_track(it, None)
-    assert it.sel == 2                                     # the SDH track inside the video
-    assert batch.plain_partner(it) is not None             # the .srt is used as the cross-check
+    # the plain .srt wins over the SDH track inside the video (#20): it is cleaned and embedded, the SDH track stays
+    assert it.track().external.endswith("Movie.en.srt") and batch.plain_pick(it, it.track())
+    assert batch.plain_partner(it) is None
     assert [os.path.basename(p) for p in batch.removable_sidecars(it, False, "replace")] == ["Movie.en.srt"]
+    assert [os.path.basename(p) for p in batch.removable_sidecars(it, True, "replace")] == ["Movie.en.srt"]
 
 
 if __name__ == "__main__":
