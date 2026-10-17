@@ -95,9 +95,11 @@ Turn this off with *Settings → One file per video*. Dropping just the `.srt` f
 
 Click any file (or **Review**) to see it up close:
 
-- **Subtitle track** — the SDH track is picked automatically (by its flag/name, or by its content when it isn't
-  labelled). Commentary, forced and signs/songs tracks are never picked. The regular track in the same file is
-  used as a cross-check: if it has words at the same moment that SubScrub removed, that line is flagged.
+- **Subtitle track** — if the file already has a regular English track, that one is cleaned (to catch stray notes),
+  made the default and named "English", and the SDH track stays, just no longer the default. If the only English
+  track is SDH (flagged, named, or recognised by its content), that one is cleaned and the SDH original is dropped.
+  Commentary, forced and signs/songs tracks are never picked. When an SDH track is cleaned, the regular track in the
+  same file is used as a cross-check: if it has words at the same moment that SubScrub removed, that line is flagged.
 - **What to remove** (left sidebar) — every kind of edit with how many lines it touches; switch one off to see the result
   without it. *Use these for all files* makes them your default.
 - **Preview** — a dark "screen" shows the selected line the way it will look on the TV. The timeline marks removed lines (light), trimmed lines (grey) and lines to check (red). The list
@@ -177,7 +179,7 @@ every line it would ask about, and anything that still looks like SDH after clea
 
 - `subscrub/cleaner.py` – the rules, per-line risk grading, file-level detection (OCR, `Name:` style) and the
   cross-check against the regular track
-- `subscrub/batch.py` – picking the SDH track and its regular partner
+- `subscrub/batch.py` – picking the track to clean (regular first, else SDH) and the regular partner
 - `subscrub/subformats.py` – SRT / ASS / WebVTT reading and writing
 - `subscrub/media.py` – FFmpeg/MKVToolNix discovery, extraction, remuxing, verification
 - `subscrub/ui/` – the PySide6 interface (`main_window.py` Files/Review/Settings, `preview.py` the timeline + list)

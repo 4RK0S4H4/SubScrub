@@ -17,7 +17,7 @@ _ids = itertools.count(1)
 REFERENCE_OPTS = CleanOptions(lyrics=False, lyric_symbols=False, dialogue_dashes=False, onscreen_text=False,
                               ocr_fixes=False)
 SDH_RULES = {"brackets", "parentheses", "labels", "music", "sound_words"}
-NOT_DIALOGUE_TRACK = re.compile(r"comment|sign|song|forced|karaoke|lyrics only|descriptive|audio desc", re.I)
+NOT_DIALOGUE_TRACK = re.compile(r"\b(?:comment|sign|song|forced|karaoke|lyrics only|descriptive|audio desc)", re.I)
 
 
 @dataclass

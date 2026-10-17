@@ -2,7 +2,8 @@
 
 A Windows desktop app (Python 3.11+, PySide6/Qt) that strips non-dialogue SDH text from subtitle tracks, such as
 `[door creaks]`, `JOHN:` and `♪ music ♪`. It works on MKV and other videos and on standalone .srt/.ass/.vtt files.
-The cleaned track goes back into the video as the default, and the SDH track is dropped. Optionally it also renames
+The cleaned track goes back into the video as the default. If the file has a regular English track, that one is cleaned
+and the SDH track is kept; if only an SDH track exists, it is cleaned and dropped. Optionally it also renames
 videos from TMDB (`The Walking Dead S7 E2.mkv`) and removes other-language subtitle tracks. It never re-encodes
 video. FFmpeg and MKVToolNix do the muxing.
 
@@ -103,8 +104,12 @@ can't push tags, so don't try `git push` of a tag.)
 - Strip: sounds in [brackets] and (parentheses), speaker names, music cues, on-screen-text notes
   (`[sign reads: EXIT]` becomes `EXIT`) and sound words on their own line.
 - Song lyrics stay, in italics, without ♪. Dialogue dashes are always removed. Never reflow or merge lines.
-- Save defaults: replace the original, make the cleaned track the default, drop the SDH track. The original goes
-  to the Recycle Bin only after the new file checks out.
+- Save defaults: replace the original, make the cleaned track the default. The original goes to the Recycle Bin
+  only after the new file checks out.
+- Which track gets cleaned (decided 2026-10-17): when a regular (non-SDH) English track exists, clean that one to
+  catch strays, make it the default, name it "English" and keep the SDH track (just not as the default). The cleaned
+  copy replaces the regular one, so there is no duplicate. When only an SDH/HI/CC track exists, clean it and drop the
+  original SDH track. A track picked by hand in Review always wins.
 - Uncertain lines: ask at save time (review / best guess / leave alone / skip). Never learn from corrections.
 - No whole-library mode. Only files the user picks.
 - A folder of videos with matching `.srt` sidecars becomes one file per video, with the cleaned subtitle inside.

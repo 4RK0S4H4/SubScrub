@@ -311,7 +311,7 @@ class SettingsDialog(GlassDialog):
         lay.addSpacing(4)
         self.default_row = OptionRow("Make the Cleaned Track the Default", "Jellyfin and players pick it automatically.",
                                      win.make_default)
-        self.keep_row = OptionRow("Keep the SDH Track Too", "Off: the SDH track is replaced by the clean one.",
+        self.keep_row = OptionRow("Keep the SDH Track Too", "Off: the SDH track is replaced by the clean one. Doesn't apply when the file has a regular English track.",
                                   win.keep_sdh)
         lay.addWidget(self.default_row)
         lay.addWidget(self.keep_row)

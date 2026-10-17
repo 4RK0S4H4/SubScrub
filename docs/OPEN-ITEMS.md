@@ -11,6 +11,14 @@ Decided by the user (2026-10-17, v2.8.0): S4 Glass look with a top bar and Files
 neutrals with a faint crimson tint (instead of pure greys). Approved from a mockup:
 https://claude.ai/artifact/67nXdn4nt8ehRWbJhs6Gbg
 
+Decided by the user (2026-10-17, issue #20): when a file has a regular (non-SDH) English track, SubScrub cleans that
+one (to catch strays), makes it the default, names it "English" and keeps the SDH/HI track (not as the default). The
+cleaned copy replaces the regular one, so there is no duplicate English track. If the regular track has nothing to
+clean it is still made the default (and left alone if it already is). When only an SDH/HI/CC track exists, behaviour
+is as before: clean it and drop the original SDH track per the save default. A track picked by hand in Review still
+wins. The "to check" grading runs without the SDH cross-check in the regular-track case. Code: `batch.pick_track`,
+`batch.plain_pick`, `media.save`. "Keep the SDH Track Too" only matters when an SDH track is the one cleaned.
+
 ## Next up: install and update (the user's stated priority)
 
 Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Python and builds the exe) and runs
