@@ -52,9 +52,14 @@ wins. The "to check" grading runs without the SDH cross-check in the regular-tra
 
 - Done in batch 3: Review shortcuts (J/K move between lines, O keeps the original, F3 next change), shown as keycaps
   under the line list (hidden in a small window); the update check in About.
-- **(ask)** An optional local AI check for edge cases. The user has an RTX 4070. The earlier recommendation was a
-  narrow, opt-in feature that only suggests fixes for lines already marked "to check", run by a small local model,
-  never auto-applied. The user wasn't sure it's worth it.
+- **Local AI check (#10, label `future plan`: not part of any batch, only built when the user names it).** Decided
+  2026-10-17: it only looks at lines already marked "to check"; it suggests "keep original" or "remove" with a
+  one-line reason and never applies anything by itself (Review shows it next to the "Check:" reason; no accept-all);
+  it never learns from corrections; off by default with one switch in Settings; all local, nothing leaves the PC.
+  The model runs in **Ollama** that the user installs (SubScrub finds it and has a model name and a Test Connection
+  button); a built-in model is not planned. **Step 1 is an experiment with no UI:** hand-label flagged lines from the
+  sample library and the cleaner corpus, run two or three models on them, and show the user the hit rate. Only build
+  the Settings and Review parts if a model clearly beats "always keep the original". Not started.
 - A whole-library mode was explicitly rejected. Only revisit if the user asks, and only with a proper built-in
   backup step.
 
