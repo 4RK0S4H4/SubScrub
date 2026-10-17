@@ -25,7 +25,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -86,10 +86,17 @@ jobs:
       - name: Smoke-test the installer
         shell: pwsh
         run: |
+          # not "Start-Process -Wait": a quiet install starts SubScrub itself, and -Wait would wait for the app too
+          function Run-Quietly($file, $argList) {
+            $p = Start-Process $file -ArgumentList $argList -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "$file did not finish within 3 minutes" }
+            return $p.ExitCode
+          }
           $dir = Join-Path $env:RUNNER_TEMP "SubScrubInstalled"
           $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir", "/LOG=$env:RUNNER_TEMP\setup.log")
-          $p = Start-Process dist\SubScrub-Setup.exe -ArgumentList $setupArgs -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw "installer exit code $($p.ExitCode)" }
+          $code = Run-Quietly dist\SubScrub-Setup.exe $setupArgs
+          if ($code -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw "installer exit code $code" }
           foreach ($f in 'SubScrub.exe', 'unins000.exe') { if (-not (Test-Path "$dir\$f")) { throw "$f was not installed" } }
           $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\SubScrub.lnk"
           if (-not (Test-Path $lnk)) { throw "no Start-menu shortcut" }
@@ -98,12 +105,12 @@ jobs:
           if ($run.Count -eq 0) { throw "the installed SubScrub did not start" }
           $run | Stop-Process -Force
           Start-Sleep -Seconds 2
-          $p = Start-Process dist\SubScrub-Setup.exe -ArgumentList $setupArgs -Wait -PassThru     # an upgrade over the top
-          if ($p.ExitCode -ne 0) { throw "second install exit code $($p.ExitCode)" }
+          $code = Run-Quietly dist\SubScrub-Setup.exe $setupArgs                           # an upgrade over the top
+          if ($code -ne 0) { throw "second install exit code $code" }
           Start-Sleep -Seconds 5
           Get-Process SubScrub -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep -Seconds 2
-          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          $null = Run-Quietly "$dir\unins000.exe" @('/VERYSILENT', '/SUPPRESSMSGBOXES')
           for ($i = 0; $i -lt 30 -and (Test-Path "$dir\SubScrub.exe"); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path "$dir\SubScrub.exe") { throw "the uninstaller left SubScrub.exe behind" }
           if (Test-Path $lnk) { throw "the uninstaller left the Start-menu shortcut" }
