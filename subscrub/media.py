@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 IS_WIN = os.name == "nt"
+PATH_LIMIT = 259 if IS_WIN else 0        # Windows file paths that tools can open (long-path support is not assumed)
 Progress = Callable[[float, str], None]      # (0..1 or -1 for indeterminate, message)
 Log = Callable[[str], None]
 
@@ -989,6 +990,11 @@ def _remux(tools, info, track, text, fmt, opts, lang, name, on_progress, cancel,
         raise ToolError(f"Not enough free space on that drive: need about {info.size * 1.02 / 1e9:.1f} GB, "
                         f"have {free / 1e9:.1f} GB.")
 
+    work = final.with_name(f"{src.stem}.subscrub-tmp{final.suffix}") if opts.mode == "replace" else final
+    if PATH_LIMIT and len(str(work)) > PATH_LIMIT:
+        raise ToolError(f"The path to “{src.name}” is too long once the temporary copy is added ({len(str(work))} "
+                        f"characters; the limit is {PATH_LIMIT}). Nothing was changed. Move it to a shorter folder "
+                        "and save again.")
     tmpdir = tempfile.mkdtemp(prefix="subscrub_mux_")
     sub_path = None
     if text is not None:
@@ -1000,7 +1006,6 @@ def _remux(tools, info, track, text, fmt, opts, lang, name, on_progress, cancel,
     if opts.drop_other_languages:
         drop |= {t.index for t in info.subs if is_other_language(t, opts.keep_language)}
 
-    work = final.with_name(f"{src.stem}.subscrub-tmp{final.suffix}") if opts.mode == "replace" else final
     if work.exists():
         work.unlink()
     use_mkvmerge = info.kind == "mkv" and bool(tools.mkvmerge)

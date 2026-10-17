@@ -1,0 +1,80 @@
+# One tricky subtitle line per row (tests/test_cleaner.py runs the whole table).
+# Columns, tab separated: input, expected result, flag.
+#   cues in one row are separated by ' ‖ ' and cleaned together as one file (for lines that depend on their neighbours);
+#   '\n' is a line break; expected '=' means unchanged, '∅' means the cue is removed;
+#   flag is 'check' when the cleaner must mark a line 'to check' (risk 2), else '-'.
+# Add a row for every bug found; never edit an expected result without the user's say-so (these are their rules).
+
+# Plain dialogue that must be left alone
+Meet me at 5:30.	=	-
+Rule number one: never lie.	=	-
+Dear John: I'm leaving.	=	-
+Tom: Hey.	=	-
+I-I-I don't know.	=	-
+Uh-huh.	=	-
+Wait - what?	=	-
+Time: 10:30	=	-
+THE END	=	-
+He said: "Run."	=	-
+"Quote: hi"	=	-
+NOTE: this is important	=	-
+WARNING: do not enter	=	-
+Dr. Smith: hello	=	-
+Sign: EXIT	=	-
+...	=	-
+Hmm.	=	-
+Wait — what?	=	-
+I'm--I'm sorry.	=	-
+
+# Sounds, names and music that go
+[door creaks]	∅	-
+(sighs)	∅	-
+(Frank)	∅	-
+(Car horn)	∅	-
+JOHN: Hello.	Hello.	-
+MAN 1: Go.	Go.	-
+MAN (on phone): Hello?	Hello?	-
+[ON PHONE] Hello?	Hello?	-
+♪ music ♪	∅	-
+whoosh	∅	-
+pew pew pew	∅	-
+Hello, [chuckles] world.	Hello, world.	-
+(sighs) Fine.	Fine.	-
+Fine. (sighs)	Fine.	-
+(speaking Spanish) Hola.	Hola.	-
+[in Spanish] ¿Dónde está?	¿Dónde está?	-
+[man speaking\nindistinctly]	∅	-
+<i>[door creaks]</i>\nHello?	Hello?	-
+{\an8}[gunshot]	∅	-
+SOMEBODY: Hi.\nANOTHER: Bye.	Hi.\nBye.	-
+[SIGN READS: EXIT]	EXIT	-
+
+# Dialogue dashes, every kind (#13)
+- Hi.\n- [coughs] Hey.	Hi.\nHey.	-
+– Hi.	Hi.	-
+— Hi.	Hi.	-
+‐ Hi.	Hi.	-
+‑Hi.	Hi.	-
+−Hi.	Hi.	-
+-- Wait.	Wait.	-
+-- What?	What?	-
+Hi. – Hey.	Hi. Hey.	-
+– JOHN: Hi.	Hi.	-
+--and then he left.	=	-
+- Whoosh.	Whoosh.	-
+
+# Parentheses that could be dialogue (#14)
+Mom (she's in the car) is fine.	Mom is fine.	check
+We need 2 (two) guns.	We need 2 guns.	check
+I (and I mean this) love you.	I love you.	check
+(I'm not kidding)	∅	check
+He (sighs) agreed.	He agreed.	-
+
+# Song lyrics stay, in italics
+♪ Walking home in the rain ♪	<i>Walking home in the rain</i>	-
+
+# A description split across cues
+Okay.\n[man speaking ‖ indistinctly] Come in.	Okay. ‖ Come in.	-
+
+# Disc OCR: a note read as j"
+j" the killing moon ‖ j" will come too soon ‖ j" up in your arms\ntoo late to beg you ‖ (J' echo & the bunnymen:\n"The killing moon") ‖ Hello.	<i>the killing moon</i> ‖ <i>will come too soon</i> ‖ <i>up in your arms\ntoo late to beg you</i> ‖ ∅ ‖ Hello.	-

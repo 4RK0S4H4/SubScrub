@@ -45,10 +45,14 @@ Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Pyt
 
 ## Tests and CI
 
-- `tests.test_pipeline` runs on the original sample set but not fully on `tests.make_samples` output: the sample
-  MP4 needs two subtitle tracks, and the sample MKV needs a font attachment and chapters. Extend `make_samples`
-  so the pipeline test runs on generated media, then add it to CI (install ffmpeg and mkvtoolnix with choco on
-  the runner).
+- Every PR runs, on Windows (with FFmpeg and MKVToolNix from Chocolatey) and again on Linux: the cleaner corpus
+  (`tests/fixtures/corpus.tsv`, one row per tricky line, run by `tests.test_cleaner`), `tests.test_pipeline` on
+  generated media (`tests.make_samples`: an MKV with a font attachment and chapters, an MP4 with two tracks) and
+  `tests.test_edge` (awkward files through the real batch worker: no subtitles, picture subtitles only, two SDH
+  tracks, empty and all-SDH tracks, empty/UTF-16/cp1252 sidecars, an emoji-and-symbols name, Cancel, a too-long
+  path). `tests.test_ui` also covers double Save, adding a file twice, closing mid-save and TMDB failures.
+- Not testable in CI: Recycle Bin behaviour on a user's real drive, the "files in use" check with a torrent client,
+  real TMDB calls, the exe on a real PC, the title-bar colour and Mica.
 - Done in 2.8.0: CI attaches screenshots of every screen in both themes (job "screenshots", generated media only).
 
 ## Ideas the user has mentioned (not started)

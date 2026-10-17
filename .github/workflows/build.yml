@@ -2,6 +2,7 @@
 #   - every push and pull request: run the tests, build SubScrub.exe, attach it to the run as an artifact
 #   - a tag like v2.7.3: also publish a GitHub Release with SubScrub.exe (the user downloads from there)
 #   - "Run workflow" on main with a version typed in (e.g. 2.7.3): does the same and creates the tag itself
+#   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
 #     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media)
 name: build
@@ -37,6 +38,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pillow
 
+      # the tools the app itself uses, so the save path is tested on real media on the real OS
+      - name: Install FFmpeg and MKVToolNix
+        run: choco install ffmpeg mkvtoolnix -y --no-progress
+
       - name: Tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -47,8 +52,8 @@ jobs:
           python -m tests.test_swap
           python -m tests.test_library
           python -m tests.test_ui
-
-      # tests.test_pipeline needs ffmpeg + MKVToolNix and a folder of sample videos; see docs/OPEN-ITEMS.md.
+          python -m tests.test_pipeline
+          python -m tests.test_edge
 
       - name: Build SubScrub.exe
         run: >
@@ -84,6 +89,39 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist/SubScrub.exe
           generate_release_notes: true
+
+  # the same tests on Linux: fast, and a second opinion on paths and encodings
+  linux:
+    if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix libegl1 libgl1 libxkbcommon0 \
+            libfontconfig1 libdbus-1-3
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m tests.test_cleaner
+          python -m tests.test_batch
+          python -m tests.test_naming
+          python -m tests.test_swap
+          python -m tests.test_library
+          python -m tests.test_ui
+          python -m tests.test_pipeline
+          python -m tests.test_edge
 
   screenshots:
     if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
