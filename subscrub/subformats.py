@@ -185,6 +185,26 @@ def _render_vtt(doc: SubtitleDoc, texts: list[str | None]) -> str:
 
 # --------------------------------------------------------------------------- ASS / SSA
 
+def _ass_breaks(raw: str) -> tuple[str, list[str]]:
+    """Dialogue text with both kinds of line break (\\N hard, \\n soft) turned into newlines, plus which kind each
+    was, so the text can be written back as it came. Breaks inside {...} override blocks are not breaks."""
+    kinds: list[str] = []
+
+    def brk(m):
+        kinds.append(m.group(0))
+        return "\n"
+    out = [seg if i % 2 else re.sub(r"\\[Nn]", brk, seg) for i, seg in enumerate(re.split(r"(\{[^}]*\})", raw))]
+    return "".join(out), kinds
+
+
+def _ass_join(text: str, kinds: list[str]) -> str:
+    """The reverse: newlines back to \\N / \\n. If lines were removed, the remaining breaks are hard ones."""
+    parts = text.split("\n")
+    if len(parts) - 1 != len(kinds):
+        kinds = ["\\N"] * (len(parts) - 1)
+    return "".join(p + (kinds[i] if i < len(kinds) else "") for i, p in enumerate(parts))
+
+
 def _parse_ass(text: str) -> SubtitleDoc:
     doc = SubtitleDoc("ass", [])
     section = ""
@@ -207,8 +227,9 @@ def _parse_ass(text: str) -> SubtitleDoc:
                 if len(parts) == len(fmt_fields):
                     rec = dict(zip(fmt_fields, parts))
                     prefix = "Dialogue:" + lead + ",".join(parts[:-1]) + ","
-                    cue = Cue(rec.get("start", ""), rec.get("end", ""),
-                              parts[-1].replace("\\N", "\n"), {"prefix": prefix, "style": rec.get("style", "")})
+                    body_text, breaks = _ass_breaks(parts[-1])
+                    cue = Cue(rec.get("start", ""), rec.get("end", ""), body_text,
+                              {"prefix": prefix, "style": rec.get("style", ""), "breaks": breaks})
                     doc.items.append(("cue", len(doc.cues)))
                     doc.cues.append(cue)
                     continue
@@ -225,7 +246,7 @@ def _render_ass(doc: SubtitleDoc, texts: list[str | None]) -> str:
         t = texts[val]
         if t is None:
             continue
-        out.append(doc.cues[val].extra["prefix"] + t.replace("\n", "\\N"))
+        out.append(doc.cues[val].extra["prefix"] + _ass_join(t, doc.cues[val].extra.get("breaks", [])))
     return "\n".join(out).replace("\n", doc.newline)
 
 
