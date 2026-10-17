@@ -201,8 +201,12 @@ it: remove the torrent afterwards (keep the files), or use *New File* to keep th
 
 ## What's new
 
-### Next version (not released yet)
+### 3.0
 
+**A new icon, a real installer and safer saving.**
+
+- **New app icon.** The `[ ]` sound tag struck out in crimson above two clean caption lines, on the same near-black
+  rounded square. It is redrawn for 16 and 24 px so it stays sharp in the taskbar and title bar.
 - **A real installer and updates.** `SubScrub-Setup.exe` installs without administrator rights, with shortcuts and an
   uninstaller. SubScrub checks for new versions once a day and updates itself with one click; also in ⋯ and About.
 - **Review shortcuts:** `J` / `K` move between lines and `O` keeps the original, shown as keycaps under the list.

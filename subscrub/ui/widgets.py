@@ -14,7 +14,7 @@ from collections import OrderedDict
 from PySide6.QtCore import (Property, QByteArray, QEasingCurve, QEvent, QObject, QPoint, QPointF,
                             QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal)
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QLinearGradient, QPainter,
-                           QPainterPath, QPen, QPixmap)
+                           QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QGridLayout, QHBoxLayout, QLabel, QMenu,
                                QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -187,29 +187,77 @@ def refresh_icons():
     _THEMED[:] = alive
 
 
+def _white(a: float) -> QColor:
+    c = QColor(255, 255, 255)
+    c.setAlphaF(a)
+    return c
+
+
+def _brackets(p: QPainter, u: float, xs: tuple, y0: float, y1: float, alpha: float, width: float):
+    """The faded [ ] sound tag: xs = (outer left, inner left, inner right, outer right) on the 256 grid."""
+    p.setPen(QPen(_white(alpha), width * u, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+    ol, il, ir, orr = xs
+    p.drawPolyline([QPointF(il * u, y0 * u), QPointF(ol * u, y0 * u), QPointF(ol * u, y1 * u), QPointF(il * u, y1 * u)])
+    p.drawPolyline([QPointF(ir * u, y0 * u), QPointF(orr * u, y0 * u), QPointF(orr * u, y1 * u), QPointF(ir * u, y1 * u)])
+
+
+def _bar(p: QPainter, u: float, x: float, y: float, w: float, h: float, color: QColor):
+    p.setPen(Qt.NoPen)
+    p.setBrush(color)
+    p.drawRoundedRect(QRectF(x * u, y * u, w * u, h * u), h / 2 * u, h / 2 * u)
+
+
 def logo_pixmap(size: int = 64, dpr: float = 2.0) -> QPixmap:
-    """App mark: near-black rounded square, a red and a white subtitle line, a faded [ ] tag scrubbed away."""
+    """App mark (3.0): a near-black rounded square, a faded [ ] sound tag struck through in crimson, and two clean
+    caption lines on a glass plate. Drawn on a 256 grid; 24 px and below use a bolder version without the plate."""
     pm = QPixmap(int(size * dpr), int(size * dpr))
     pm.setDevicePixelRatio(dpr)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    g = QLinearGradient(0, 0, size, size)
+    u = size / 256
+    crimson = QColor("#E5304F")
+    small = size <= 24
+    inset, radius = (4, 52) if small else (8, 50)
+    tile = QRectF(inset * u, inset * u, (256 - 2 * inset) * u, (256 - 2 * inset) * u)
+    g = QLinearGradient(0, tile.top(), 0, tile.bottom())
     g.setColorAt(0, QColor("#2E2E33"))
     g.setColorAt(1, QColor("#0F0F11"))
-    p.setBrush(g)
     p.setPen(Qt.NoPen)
-    p.drawRoundedRect(QRectF(0, 0, size, size), size * 0.24, size * 0.24)
-    u = size / 64
-    p.setBrush(QColor("#C81E3A"))
-    p.drawRoundedRect(QRectF(14 * u, 30 * u, 36 * u, 7 * u), 3.5 * u, 3.5 * u)
-    p.setBrush(QColor(255, 255, 255))
-    p.drawRoundedRect(QRectF(19 * u, 42 * u, 26 * u, 7 * u), 3.5 * u, 3.5 * u)
-    pen = QPen(QColor(255, 255, 255, 120), 3.2 * u, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-    p.setPen(pen)
+    p.setBrush(g)
+    p.drawRoundedRect(tile, radius * u, radius * u)
+    if small:
+        _brackets(p, u, (72, 96, 160, 184), 38, 112, 0.6, 22)
+        p.setPen(QPen(crimson, 22 * u, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(44 * u, 75 * u), QPointF(212 * u, 75 * u))
+        _bar(p, u, 50, 146, 156, 30, _white(1))
+        _bar(p, u, 80, 192, 96, 30, _white(1))
+        p.end()
+        return pm
+    hi = QRadialGradient(QPointF(75 * u, 22 * u), 192 * u)
+    hi.setColorAt(0, _white(0.1))
+    hi.setColorAt(1, _white(0))
+    p.setBrush(hi)
+    p.drawRoundedRect(tile, radius * u, radius * u)
+    edge = QLinearGradient(0, tile.top(), 0, tile.bottom())
+    edge.setColorAt(0, _white(0.5))
+    edge.setColorAt(0.3, _white(0.08))
+    edge.setColorAt(1, QColor(0, 0, 0, 56))
+    p.setPen(QPen(edge, 3 * u))
     p.setBrush(Qt.NoBrush)
-    p.drawPolyline([QPointF(27 * u, 12 * u), QPointF(23 * u, 12 * u), QPointF(23 * u, 22 * u), QPointF(27 * u, 22 * u)])
-    p.drawPolyline([QPointF(37 * u, 12 * u), QPointF(41 * u, 12 * u), QPointF(41 * u, 22 * u), QPointF(37 * u, 22 * u)])
+    p.drawRoundedRect(tile.adjusted(1.5 * u, 1.5 * u, -1.5 * u, -1.5 * u), 48.5 * u, 48.5 * u)
+    _brackets(p, u, (83, 100, 156, 173), 48, 102, 0.5, 13)
+    _bar(p, u, 110, 69, 36, 12, _white(0.3))
+    p.setPen(QPen(QColor(0, 0, 0, 41), 12 * u, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(62 * u, 78 * u), QPointF(194 * u, 78 * u))
+    p.setPen(QPen(crimson, 12 * u, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(62 * u, 75 * u), QPointF(194 * u, 75 * u))
+    p.setPen(QPen(_white(0.16), 2 * u))
+    p.setBrush(_white(0.07))
+    p.drawRoundedRect(QRectF(44 * u, 130 * u, 168 * u, 80 * u), 22 * u, 22 * u)
+    _bar(p, u, 66, 151, 124, 15, _white(1))
+    _bar(p, u, 88, 175, 80, 15, _white(0.9))
     p.end()
     return pm
 
