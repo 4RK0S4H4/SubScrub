@@ -1,22 +1,26 @@
-"""Before/after preview: a timeline scrub bar with removal markers, synced to a
-side-by-side list of every changed line. Judgement calls are flagged with the reason, and
-any edit can be undone line by line."""
+"""Before/after preview: the caption "screen", a timeline with removal markers, and a side-by-side list of every
+changed line. Judgement calls are flagged with the reason, and any edit can be undone line by line.
+
+Performance: cue times and visible text are worked out once per track, row heights and laid-out text are cached by
+content (so rebuilding the list after a click reuses them), the timeline's marks are painted once into a cached
+layer, and putting one line back updates just that row."""
 from __future__ import annotations
 
 import bisect
 import html
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QListView, QPushButton, QStyle,
-                               QStyledItemDelegate, QToolTip, QVBoxLayout, QWidget)
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QPoint, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QTextDocument
+from PySide6.QtWidgets import (QAbstractItemView, QListView, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from ..cleaner import CleanResult, diff_html, visible_text
-from .theme import num_font, qc
-from .widgets import ScreenView
 from ..subformats import to_seconds
+from . import theme
+from .theme import num_font, qc
+from .widgets import T, ScreenView, hide_tip, show_tip
 
 
 # ============================================================================ data
@@ -43,6 +47,10 @@ class Row:
     override: str | None = None    # "orig" when the user kept the original line
     italic: bool = False           # the saved line is in italics (lyrics, quoted voices)
 
+    @property
+    def key(self) -> tuple:
+        return (self.cue, self.status, self.before, self.after, self.flagged, self.why, self.override, self.italic)
+
 
 @dataclass
 class Mark:
@@ -52,43 +60,60 @@ class Mark:
     text: str
 
 
+def _prep(result: CleanResult) -> tuple[list[tuple[float, float]], list[str]]:
+    """Cue times and visible text, once per track (they don't change when edits are switched on and off)."""
+    doc = result.doc
+    cached = getattr(doc, "_preview_prep", None)
+    if cached is not None:
+        return cached
+    times, befores = [], []
+    for cue in doc.cues:
+        s, e = parse_time(cue.start), parse_time(cue.end)
+        times.append((s, max(e, s)))
+        befores.append(visible_text(cue.text, doc.fmt))
+    doc._preview_prep = (times, befores)
+    return doc._preview_prep
+
+
+def row_for(result: CleanResult, i: int) -> tuple[Row, Mark]:
+    times, befores = _prep(result)
+    fmt = result.doc.fmt
+    cue, r = result.doc.cues[i], result.results[i]
+    start, end = times[i]
+    before = befores[i]
+    status = "kept" if not r.changed else ("removed" if r.text is None else "edited")
+    override = result.overrides.get(i)
+    flagged = r.changed and r.risk >= 2
+    if not r.changed or override == "orig":
+        after = before
+        final = cue.text
+    else:
+        after = None if r.text is None else visible_text(r.text, fmt)
+        final = r.text or ""
+    mark = "flagged" if flagged and override is None else ("kept" if override == "orig" else status)
+    row = Row(i, start, end, status, before, after, flagged, "; ".join(r.why[:2]) if r.changed else "",
+              override, bool(re.search(r"<i>|\\i1", final or "", re.I)))
+    return row, Mark(start, end, mark, before)
+
+
 def build(result: CleanResult, show: str) -> tuple[list[Row], list[Mark]]:
     """show: 'check' (judgement calls only) | 'changes' | 'all'"""
-    fmt = result.doc.fmt
     rows, marks = [], []
-    for i, (cue, r) in enumerate(zip(result.doc.cues, result.results)):
-        start, end = parse_time(cue.start), parse_time(cue.end)
-        before = visible_text(cue.text, fmt)
-        status = "kept" if not r.changed else ("removed" if r.text is None else "edited")
-        override = result.overrides.get(i)
-        flagged = r.changed and r.risk >= 2
-        if not r.changed or override == "orig":
-            after = before
-            final = cue.text
-        else:
-            after = None if r.text is None else visible_text(r.text, fmt)
-            final = r.text or ""
-        mark = "flagged" if flagged and override is None else ("kept" if override == "orig" else status)
-        marks.append(Mark(start, max(end, start), mark, before))
-        if show == "changes" and status == "kept":
+    for i in range(len(result.results)):
+        row, mark = row_for(result, i)
+        marks.append(mark)
+        if show == "changes" and row.status == "kept":
             continue
-        if show == "check" and not flagged:
+        if show == "check" and not row.flagged:
             continue
-        rows.append(Row(i, start, end, status, before, after, flagged, "; ".join(r.why[:2]) if r.changed else "",
-                        override, bool(re.search(r"<i>|\\i1", final or "", re.I))))
+        rows.append(row)
     rows.sort(key=lambda x: x.start)
     marks.sort(key=lambda m: m.start)
     return rows, marks
 
 
-def _alpha(color: str, a: float) -> QColor:
-    c = QColor(color)
-    c.setAlphaF(a)
-    return c
-
-
 def _blend(fg: str, bg: str, a: float) -> str:
-    f, b = QColor(fg), QColor(bg)
+    f, b = qc(fg), qc(bg)
     return QColor(round(f.red() * a + b.red() * (1 - a)), round(f.green() * a + b.green() * (1 - a)),
                   round(f.blue() * a + b.blue() * (1 - a))).name()
 
@@ -103,6 +128,11 @@ class PreviewModel(QAbstractListModel):
         self.rows = rows
         self.endResetModel()
 
+    def replace(self, i: int, row: Row):
+        self.rows[i] = row
+        idx = self.index(i)
+        self.dataChanged.emit(idx, idx)
+
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.rows)
 
@@ -114,155 +144,206 @@ class PreviewModel(QAbstractListModel):
             return row
         if role == Qt.DisplayRole:
             return row.before
-        if role == Qt.ToolTipRole:
-            return None
         return None
 
 
 # ============================================================================ list + delegate
 
-PAD_L, TIME_W, GAP, PAD_R, VPAD, FOOT_H = 16, 58, 18, 16, 10, 30
+PAD_L, TIME_W, GAP, PAD_R, VPAD, FOOT_H = 18, 58, 18, 16, 10, 34
+BTN_W = 116
 
 
 def columns(width: int) -> tuple[int, int, int, int]:
     """(x_time, x_before, x_after, col_w)"""
-    x_before = PAD_L + TIME_W + 10
+    x_before = PAD_L + TIME_W + 4
     col_w = max(80, (width - x_before - PAD_R - GAP) // 2)
     return PAD_L, x_before, x_before + col_w + GAP, col_w
+
+
+class _LRU(OrderedDict):
+    def __init__(self, cap: int):
+        super().__init__()
+        self.cap = cap
+
+    def get_(self, k):
+        v = self.get(k)
+        if v is not None:
+            self.move_to_end(k)
+        return v
+
+    def put(self, k, v):
+        self[k] = v
+        self.move_to_end(k)
+        if len(self) > self.cap:
+            self.popitem(last=False)
 
 
 class RowDelegate(QStyledItemDelegate):
     def __init__(self, view: "PreviewList"):
         super().__init__(view)
         self.view = view
-        self.t: dict = {}
-        self._h: dict = {}
+        self._h = _LRU(20000)           # (row key, width) -> height
+        self._docs = _LRU(1200)         # (row key, side, width, theme) -> laid-out QTextDocument
+        self._html = _LRU(6000)         # (row key, theme) -> (before html, after html)
+        self._tkey = None
 
-    def set_theme(self, t: dict):
-        self.t = t
-        self._h.clear()
+    def set_theme(self, *_):
+        self.clear(all_=True)
 
-    def clear(self):
-        self._h.clear()
+    def clear(self, all_: bool = False):
+        """Width or theme changed: heights and layouts go. (A new result keeps them: they are keyed by content.)"""
+        if all_:
+            self._h.clear()
+            self._html.clear()
+        self._docs.clear()
 
-    def _html(self, row: Row) -> tuple[str, str]:
-        t = self.t
-        text_c = t["text"] if row.status != "kept" else t["dim"]
-        before_c = t["dim"] if row.status != "kept" else t["faint"]
-        rm_bg = _blend(t["removed"], t["bg"], 0.14)
+    def _theme_key(self):
+        t = T()
+        return (t.get("is_dark"), t.get("text"))
+
+    def _row_html(self, row: Row) -> tuple[str, str]:
+        key = (row.key, self._theme_key())
+        hit = self._html.get_(key)
+        if hit is not None:
+            return hit
+        t = T()
+        text_c = qc(t["text"] if row.status != "kept" else t["text2"]).name()
+        before_c = qc(t["text2"] if row.status != "kept" else t["text3"]).name()
+        rm_c = qc(t["removed"]).name()
+        rm_bg = _blend(t["removed"], t["bg"], 0.13)
         undone = row.override == "orig"
         before = diff_html(row.before, row.after if row.status != "kept" and not undone else row.before)
         before = before.replace(
-            "<del>", f'<span style="color:{t["removed"]}; background-color:{rm_bg}; text-decoration: line-through;">'
+            "<del>", f'<span style="color:{rm_c}; background-color:{rm_bg}; text-decoration: line-through;">'
         ).replace("</del>", "</span>").replace("\n", "<br>")
         before = f'<div style="color:{before_c}">{before}</div>'
         if row.after is None:
-            after = f'<div style="color:{t["faint"]}; font-style: italic;">Removed</div>'
+            after = f'<div style="color:{qc(t["text3"]).name()}; font-style: italic;">Removed</div>'
         else:
             body = html.escape(row.after).replace(chr(10), "<br>")
             if row.italic:
                 body = f"<i>{body}</i>"
             after = f'<div style="color:{text_c}">{body}</div>'
+        self._html.put(key, (before, after))
         return before, after
 
     def has_footer(self, row: Row) -> bool:
         return row.status != "kept" and (row.flagged or row.override == "orig")
 
-    def _doc(self, html_: str, width: int, font: QFont) -> QTextDocument:
-        d = QTextDocument()
-        d.setDefaultFont(font)
-        d.setDocumentMargin(0)
-        d.setHtml(html_)
-        d.setTextWidth(width)
+    def _doc(self, row: Row, side: int, width: int, font: QFont) -> QTextDocument:
+        key = (row.key, side, width, self._theme_key())
+        d = self._docs.get_(key)
+        if d is None:
+            d = QTextDocument()
+            d.setDefaultFont(font)
+            d.setDocumentMargin(0)
+            d.setHtml(self._row_html(row)[side])
+            d.setTextWidth(width)
+            self._docs.put(key, d)
         return d
+
+    def _text_h(self, text: str, width: int, font: QFont, italic: bool = False) -> int:
+        """Height of wrapped plain text. Font metrics are far cheaper than laying out a QTextDocument, and the row
+        HTML only changes colours (and italics, measured with an italic font)."""
+        if italic:
+            font = QFont(font)
+            font.setItalic(True)
+        fm = QFontMetrics(font)
+        lines = 0
+        for part in (text or " ").split("\n"):
+            r = fm.boundingRect(0, 0, max(10, width), 100000, Qt.TextWordWrap, part or " ")
+            lines += max(1, round(r.height() / fm.lineSpacing()))
+        return lines * fm.lineSpacing()
 
     def sizeHint(self, option, index):
         row: Row = index.data(Qt.UserRole)
         width = self.view.viewport().width()
-        key = (id(row), width, row.override)
-        h = self._h.get(key)
+        key = (row.key, width)
+        h = self._h.get_(key)
         if h is None:
             _, _, _, col_w = columns(width)
-            b, a = self._html(row)
-            h = int(max(self._doc(b, col_w, option.font).size().height(),
-                        self._doc(a, col_w, option.font).size().height(),
-                        QFontMetrics(option.font).height())) + VPAD * 2
+            after = "Removed" if row.after is None else row.after
+            h = max(self._text_h(row.before, col_w, option.font),
+                    self._text_h(after, col_w, option.font, row.italic or row.after is None)) + VPAD * 2 + 2
             if self.has_footer(row):
                 h += FOOT_H
-            self._h[key] = h
+            self._h.put(key, h)
         return QSize(width, h)
 
     def button_rect(self, rect, row: Row) -> QRectF | None:
-        """The 'Keep original' / 'Use cleaned' pill in a row's footer."""
+        """The 'Keep Original' / 'Use Cleaned' button in a row's footer."""
         if not self.has_footer(row):
             return None
         x_time, x_before, x_after, col_w = columns(rect.width())
-        w = 112
-        return QRectF(rect.left() + x_after + col_w - w, rect.bottom() - FOOT_H - 2, w, FOOT_H - 4)
+        return QRectF(rect.left() + x_after + col_w - BTN_W, rect.bottom() - FOOT_H + 1, BTN_W, 26)
 
     def paint(self, p: QPainter, option, index):
         row: Row = index.data(Qt.UserRole)
-        t = self.t
+        t = T()
         r = option.rect
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         selected = bool(option.state & QStyle.State_Selected)
         hover = bool(option.state & QStyle.State_MouseOver)
-        if row.flagged and row.override is None:
-            p.fillRect(r, _alpha(t["accent"], 0.15 if selected else 0.08))
-        elif selected:
-            p.fillRect(r, _alpha(t["text"], 0.10 if t.get("is_dark") else 0.06))
-        elif hover:
-            p.fillRect(r, _alpha(t["text"], 0.05))
-        # status edge
+        box = QRectF(r).adjusted(4, 1, -4, -1)
+        if selected or hover:                      # rows and selections stay neutral grey (S4 Glass)
+            p.setPen(Qt.NoPen)
+            p.setBrush(qc(t["bg_sel"] if selected else t["bg_hover"]))
+            p.drawRoundedRect(box, 8, 8)
+        # status: a slim bar at the row's left edge, never a tinted row
         if row.override == "orig":
-            edge = t["faint"]
+            edge = t["mute_line"]
         elif row.flagged:
-            edge = t["accent"]
+            edge = t["btn"]
         else:
             edge = {"removed": t["removed"], "edited": t["trim"]}.get(row.status)
         if edge:
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(edge))
-            p.drawRoundedRect(QRectF(r.left() + 4, r.top() + 8, 3, r.height() - 16), 1.5, 1.5)
-        # separator
-        p.setPen(QPen(qc(t["border"]), 1))
-        p.drawLine(r.left() + PAD_L, r.bottom(), r.right() - PAD_R, r.bottom())
+            p.setBrush(qc(edge))
+            p.drawRoundedRect(QRectF(r.left() + 8, r.top() + 10, 3, r.height() - 20), 1.5, 1.5)
+        if index.row() > 0 and not selected and not hover:
+            p.setPen(QPen(qc(t["border"]), 1))
+            p.drawLine(QPointF(r.left() + PAD_L, r.top() + 0.5), QPointF(r.right() - PAD_R, r.top() + 0.5))
 
         x_time, x_before, x_after, col_w = columns(r.width())
-        f = num_font(QFont(option.font))
-        f.setPointSizeF(max(7.5, f.pointSizeF() - 1))
-        p.setFont(f)
-        p.setPen(QColor(t["accent_ink"] if selected else t["faint"]))
+        tf = num_font(theme.font(12.5, 600 if selected else 400))
+        p.setFont(tf)
+        p.setPen(qc(t["text"] if selected else t["text3"]))
         p.drawText(QRectF(r.left() + x_time, r.top() + VPAD + 1, TIME_W, 20), Qt.AlignLeft | Qt.AlignTop,
                    fmt_clock(row.start))
-        b, a = self._html(row)
-        for x, h in ((x_before, b), (x_after, a)):
-            d = self._doc(h, col_w, option.font)
+        for side, x in ((0, x_before), (1, x_after)):
+            d = self._doc(row, side, col_w, option.font)
             p.save()
             p.translate(r.left() + x, r.top() + VPAD)
             d.drawContents(p)
             p.restore()
-        # footer: why it's flagged + the undo button
         br = self.button_rect(r, row)
         if br is not None:
-            fy = br.top()
-            p.setFont(f)
+            f = theme.font(12.5)
+            fb = theme.font(12.5, 600)
+            avail = br.left() - (r.left() + x_before) - 12
+            ty = QRectF(r.left() + x_before, br.top(), avail, br.height())
             if row.override == "orig":
-                note, colr = "You kept the original line.", t["faint"]
+                p.setFont(f)
+                p.setPen(qc(t["text2"]))
+                p.drawText(ty, Qt.AlignLeft | Qt.AlignVCenter, "You kept the original line.")
             else:
-                note, colr = "Check: " + (row.why or "judgement call"), t["accent_ink"]
-            fm = QFontMetrics(f)
-            avail = br.left() - (r.left() + x_before) - 10
-            p.setPen(QColor(colr))
-            p.drawText(QRectF(r.left() + x_before, fy, avail, br.height()), Qt.AlignLeft | Qt.AlignVCenter,
-                       fm.elidedText(note, Qt.ElideRight, int(avail)))
-            label = "Use cleaned" if row.override == "orig" else "Keep original"
-            p.setPen(QPen(qc(t["border_strong"]), 1))
-            p.setBrush(qc(t["surface2"]))
-            p.drawRoundedRect(br, br.height() / 2, br.height() / 2)
-            p.setPen(QColor(t["text"]))
-            p.drawText(br, Qt.AlignCenter, label)
+                head = "Check: "
+                p.setFont(fb)
+                p.setPen(qc(t["text"]))
+                p.drawText(ty, Qt.AlignLeft | Qt.AlignVCenter, head)
+                hw = QFontMetrics(fb).horizontalAdvance(head)
+                p.setFont(f)
+                p.setPen(qc(t["text2"]))
+                rest = QFontMetrics(f).elidedText(row.why or "judgement call", Qt.ElideRight, int(avail - hw))
+                p.drawText(ty.adjusted(hw, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, rest)
+            over = self.view.hover_button == row.cue
+            p.setPen(QPen(qc(t["border2"]), 1))
+            p.setBrush(qc(t["hov"] if over else t["bg2"]))
+            p.drawRoundedRect(br.adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+            p.setFont(theme.font(12.5, 500))
+            p.setPen(qc(t["text"]))
+            p.drawText(br, Qt.AlignCenter, "Use Cleaned" if row.override == "orig" else "Keep Original")
         p.restore()
 
 
@@ -273,20 +354,26 @@ class PreviewList(QListView):
         super().__init__()
         self.setObjectName("PreviewList")
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.verticalScrollBar().setSingleStep(24)
         self.setResizeMode(QListView.Adjust)
         self.setUniformItemSizes(False)
         self.setLayoutMode(QListView.Batched)
-        self.setBatchSize(150)
+        self.setBatchSize(200)
         self.setMouseTracking(True)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QListView.NoFrame)
+        self.viewport().setAutoFillBackground(False)
+        self.hover_button: int | None = None
         self.delegate = RowDelegate(self)
         self.setItemDelegate(self.delegate)
+        self._w = 0
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        self.delegate.clear()
+        if self.viewport().width() != self._w:
+            self._w = self.viewport().width()
+            self.delegate.clear()
 
     def _row_at(self, pos):
         idx = self.indexAt(pos)
@@ -305,8 +392,18 @@ class PreviewList(QListView):
         idx, row = self._row_at(e.position().toPoint())
         over = row is not None and (br := self.delegate.button_rect(self.visualRect(idx), row)) is not None \
             and br.contains(e.position())
+        cue = row.cue if over else None
+        if cue != self.hover_button:
+            self.hover_button = cue
+            self.viewport().update()
         self.viewport().setCursor(Qt.PointingHandCursor if over else Qt.ArrowCursor)
         super().mouseMoveEvent(e)
+
+    def leaveEvent(self, e):
+        if self.hover_button is not None:
+            self.hover_button = None
+            self.viewport().update()
+        super().leaveEvent(e)
 
     def mouseDoubleClickEvent(self, e):
         idx, row = self._row_at(e.position().toPoint())
@@ -316,34 +413,44 @@ class PreviewList(QListView):
         super().mouseDoubleClickEvent(e)
 
 
-# ============================================================================ scrub bar
+# ============================================================================ timeline
 
 class ScrubBar(QWidget):
     scrubbed = Signal(float)
 
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(66)
+        self.setMinimumHeight(64)
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.duration = 1.0
         self.marks: list[Mark] = []
-        self._starts: list[float] = []
         self.pos_sec = 0.0
         self.dragging = False
         self.hover_x: float | None = None
-        self.t: dict = {}
+        self._layer: QPixmap | None = None
+        self._layer_key = None
+        self._tip = ""
 
-    def set_theme(self, t):
-        self.t = t
+    def set_theme(self, *_):
+        self._layer = None
         self.update()
 
     def set_data(self, duration: float, marks: list[Mark]):
         last = max((m.end for m in marks), default=0.0)
         self.duration = max(duration or 0.0, last, 1.0)
         self.marks = marks
-        self._starts = [m.start for m in marks]
+        self._layer = None
         self.update()
+
+    def update_mark(self, start: float, status: str):
+        """One line's status changed (kept or cleaned again)."""
+        for m in self.marks:
+            if m.start == start and m.status != status:
+                m.status = status
+                self._layer = None
+                self.update()
+                break
 
     def set_position(self, sec: float):
         if not self.dragging:
@@ -352,7 +459,7 @@ class ScrubBar(QWidget):
 
     # geometry
     def _track(self) -> QRectF:
-        return QRectF(10, 14, self.width() - 20, 30)
+        return QRectF(10, 12, self.width() - 20, 30)
 
     def _x(self, sec: float) -> float:
         tr = self._track()
@@ -360,58 +467,72 @@ class ScrubBar(QWidget):
 
     def _sec(self, x: float) -> float:
         tr = self._track()
-        return max(0.0, min(self.duration, (x - tr.left()) / tr.width() * self.duration))
+        return max(0.0, min(self.duration, (x - tr.left()) / max(1.0, tr.width()) * self.duration))
 
-    def paintEvent(self, _):
-        if not self.t:
-            return
-        t = self.t
-        p = QPainter(self)
+    def _marks_layer(self) -> QPixmap:
+        t = T()
+        dpr = self.devicePixelRatioF()
+        key = (self.width(), self.height(), dpr, t.get("is_dark"), t.get("text"))
+        if self._layer is not None and self._layer_key == key:
+            return self._layer
+        pm = QPixmap(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr)))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
         tr = self._track()
         p.setPen(Qt.NoPen)
-        p.setBrush(qc(t["surface3"]))
+        p.setBrush(qc(t["mute_bg"]))
         p.drawRoundedRect(tr, 6, 6)
         mid = tr.center().y()
         heights = {"kept": 8, "edited": 18, "removed": 24, "flagged": 30}
-        colors = {"kept": QColor(t["faint"]), "edited": QColor(t["trim"]), "removed": QColor(t["removed"]),
-                  "flagged": QColor(t["accent"])}
-        colors["kept"].setAlpha(110)
+        colors = {"kept": qc(t["mute_line"]), "edited": qc(t["trim"]), "removed": qc(t["removed"]),
+                  "flagged": qc(t["btn"])}
+        left, span = tr.left(), tr.width() / self.duration
         for layer in ("kept", "edited", "removed", "flagged"):          # changes drawn on top
-            p.setBrush(colors[layer])
+            col = colors[layer]
             h = heights[layer]
             for m in self.marks:
                 if m.status != layer:
                     continue
-                x0, x1 = self._x(m.start), self._x(m.end)
-                w = max(2.0, x1 - x0)
-                p.drawRoundedRect(QRectF(x0, mid - h / 2, w, h), 1, 1)
-        # hover guide
+                x0 = left + min(self.duration, m.start) * span
+                x1 = left + min(self.duration, m.end) * span
+                p.fillRect(QRectF(x0, mid - h / 2, max(2.0, x1 - x0), h), col)
+        p.end()
+        self._layer, self._layer_key = pm, key
+        return pm
+
+    def paintEvent(self, _):
+        t = T()
+        if not t:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.drawPixmap(0, 0, self._marks_layer())
+        tr = self._track()
         if self.hover_x is not None and not self.dragging:
-            c = QColor(t["text"])
-            c.setAlpha(60)
+            c = qc(t["text"])
+            c.setAlpha(70)
             p.setPen(QPen(c, 1))
-            p.drawLine(int(self.hover_x), int(tr.top()) - 4, int(self.hover_x), int(tr.bottom()) + 4)
-        # playhead
+            p.drawLine(QPointF(self.hover_x, tr.top() - 4), QPointF(self.hover_x, tr.bottom() + 4))
         x = self._x(self.pos_sec)
-        p.setPen(QPen(QColor(t["accent"]), 2))
-        p.drawLine(QPoint(int(x), int(tr.top()) - 6), QPoint(int(x), int(tr.bottom()) + 6))
-        p.setPen(QPen(qc(t["surface_s"]), 2))
-        p.setBrush(QColor(t["accent"]))
-        p.drawEllipse(QRectF(x - 6, tr.top() - 12, 12, 12))
-        # labels
-        f = QFont(self.font())
-        f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
+        p.setPen(QPen(qc(t["btn"]), 2))
+        p.drawLine(QPointF(x, tr.top() - 4), QPointF(x, tr.bottom() + 4))
+        p.setPen(QPen(qc(t["pop_bg"]), 2))
+        p.setBrush(qc(t["btn"]))
+        p.drawEllipse(QRectF(x - 6, tr.top() - 10, 12, 12))
+        f = num_font(theme.font(11.5))
         p.setFont(f)
-        p.setPen(QColor(t["faint"]))
-        ly = tr.bottom() + 6
+        p.setPen(qc(t["text3"]))
+        ly = tr.bottom() + 5
         p.drawText(QRectF(tr.left(), ly, 80, 16), Qt.AlignLeft, "0:00")
         p.drawText(QRectF(tr.right() - 80, ly, 80, 16), Qt.AlignRight, fmt_clock(self.duration))
         label = fmt_clock(self.pos_sec)
-        fm = QFontMetrics(f)
-        lw = fm.horizontalAdvance(label) + 14
-        lx = min(max(tr.left() + 40, x - lw / 2), tr.right() - 40 - lw)
-        p.setPen(QColor(t["accent"]))
+        fb = num_font(theme.font(11.5, 600))
+        lw = QFontMetrics(fb).horizontalAdvance(label) + 14
+        lx = min(max(tr.left() + 44, x - lw / 2), tr.right() - 44 - lw)
+        p.setFont(fb)
+        p.setPen(qc(t["text"]))
         p.drawText(QRectF(lx, ly, lw, 16), Qt.AlignCenter, label)
         p.end()
 
@@ -429,23 +550,26 @@ class ScrubBar(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.dragging = True
+            hide_tip()
             self._emit(e.position().x())
 
     def mouseMoveEvent(self, e):
         x = e.position().x()
         if self.dragging:
             self._emit(x)
+            return
+        self.hover_x = x
+        m = self._nearest_change(x)
+        if m:
+            what = {"removed": "Removed", "flagged": "Check this one"}.get(m.status, "Trimmed")
+            text = html.escape(m.text.replace("\n", " ")[:90])
+            tip = f"<b>{fmt_clock(m.start)}</b>&nbsp;&nbsp;{what}<br>{text}"
         else:
-            self.hover_x = x
-            m = self._nearest_change(x)
-            if m:
-                what = {"removed": "Removed", "flagged": "Check this one"}.get(m.status, "Trimmed")
-                text = html.escape(m.text.replace("\n", " ")[:90])
-                QToolTip.showText(e.globalPosition().toPoint(),
-                                  f"<b>{fmt_clock(m.start)}</b>&nbsp;&nbsp;{what}<br>{text}", self)
-            else:
-                QToolTip.showText(e.globalPosition().toPoint(), fmt_clock(self._sec(x)), self)
-            self.update()
+            tip = fmt_clock(self._sec(x))
+        if tip != self._tip:
+            self._tip = tip
+            show_tip(e.globalPosition().toPoint(), tip, self)
+        self.update()
 
     def mouseReleaseEvent(self, e):
         if self.dragging:
@@ -454,7 +578,13 @@ class ScrubBar(QWidget):
 
     def leaveEvent(self, e):
         self.hover_x = None
+        self._tip = ""
+        hide_tip()
         self.update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._layer = None
 
     def _emit(self, x):
         self.pos_sec = self._sec(x)
@@ -468,20 +598,15 @@ class ColumnHeader(QWidget):
     def __init__(self, view: PreviewList):
         super().__init__()
         self.view = view
-        self.setFixedHeight(22)
-        self.t: dict = {}
+        self.setFixedHeight(24)
 
     def paintEvent(self, _):
-        if not self.t:
-            return
+        t = T()
         p = QPainter(self)
-        f = QFont(self.font())
-        f.setPointSizeF(max(7.5, f.pointSizeF() - 1))
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QColor(self.t["faint"]))
+        p.setFont(theme.font(12, 600))
+        p.setPen(qc(t["text2"]))
         x_time, x_before, x_after, col_w = columns(self.view.viewport().width())
-        for x, s in ((x_time, "Time"), (x_before, "Before"), (x_after, "After, as saved")):
+        for x, s in ((x_time, "Time"), (x_before, "Before"), (x_after, "After, as Saved")):
             p.drawText(QRectF(x, 0, col_w, self.height()), Qt.AlignLeft | Qt.AlignVCenter, s)
         p.end()
 
@@ -494,7 +619,7 @@ class PreviewPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        self.screen = ScreenView(height=158)
+        self.screen = ScreenView(height=150)
         lay.addWidget(self.screen)
         self.scrub = ScrubBar()
         lay.addWidget(self.scrub)
@@ -506,17 +631,17 @@ class PreviewPanel(QWidget):
         lay.addWidget(self.list, 1)
         self.rows: list[Row] = []
         self._starts: list[float] = []
+        self._result: CleanResult | None = None
         self._syncing = False
         self.scrub.scrubbed.connect(self._on_scrub)
         self.list.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.list.selectionModel().currentChanged.connect(self._on_current)
         self.position_changed.connect(self._update_screen)
 
-    def set_theme(self, t: dict):
-        self.list.delegate.set_theme(t)
-        self.scrub.set_theme(t)
-        self.screen.set_theme(t)
-        self.header.t = t
+    def set_theme(self, *_):
+        self.list.delegate.set_theme()
+        self.scrub.set_theme()
+        self.screen.update()
         self.header.update()
         self.list.doItemsLayout()
         self.list.viewport().update()
@@ -527,9 +652,9 @@ class PreviewPanel(QWidget):
         if keep_position and cur.isValid() and cur.row() < len(self.rows):
             keep_cue = self.rows[cur.row()].start
         rows, marks = build(result, show)
+        self._result = result
         self.rows = rows
         self._starts = [r.start for r in rows]
-        self.list.delegate.clear()
         self.model.set_rows(rows)
         self.scrub.set_data(duration, marks)
         if rows:
@@ -538,6 +663,24 @@ class PreviewPanel(QWidget):
         else:
             self.scrub.set_position(0)
         self.position_changed.emit()
+
+    def update_cue(self, result: CleanResult, cue: int) -> bool:
+        """One line was kept or cleaned again: update just its row and mark. False if a full rebuild is needed."""
+        if result is not self._result:
+            return False
+        k = next((j for j, r in enumerate(self.rows) if r.cue == cue), None)
+        row, mark = row_for(result, cue)
+        self.scrub.update_mark(mark.start, mark.status)
+        if k is None:
+            return True
+        old_h = self.list.delegate.sizeHint(_opt(self.list), self.model.index(k)).height()
+        self.rows[k] = row
+        self.model.replace(k, row)
+        new_h = self.list.delegate.sizeHint(_opt(self.list), self.model.index(k)).height()
+        if new_h != old_h:
+            self.list.doItemsLayout()
+        self.position_changed.emit()
+        return True
 
     def _update_screen(self):
         row = self.current_row()
@@ -552,7 +695,7 @@ class PreviewPanel(QWidget):
         else:
             right, alert = {"removed": "Removed", "edited": "Cleaned", "kept": "Unchanged"}[row.status], False
         if row.after is None:
-            self.screen.show_line("", when, right, alert, placeholder="Nothing on screen — this whole line is removed")
+            self.screen.show_line("", when, right, alert, placeholder="Nothing on screen: this whole line is removed")
         else:
             self.screen.show_line(row.after, when, right, alert, row.italic)
 
@@ -633,3 +776,11 @@ class PreviewPanel(QWidget):
         if cur.isValid() and not self._syncing and not self.scrub.dragging:
             self.scrub.set_position(self.rows[cur.row()].start)
         self.position_changed.emit()
+
+
+def _opt(view: QListView):
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    o = QStyleOptionViewItem()
+    o.font = view.font()
+    o.rect = view.viewport().rect()
+    return o

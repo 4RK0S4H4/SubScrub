@@ -1,10 +1,11 @@
 """The SubScrub main window.
 
-Two screens:
-  * Files  – drop files, each gets a status (Ready / Check / Saved…). One button saves them all.
+A glass top bar (the app's mark, Files / Review tabs, tool status, theme, Settings, More) over two screens:
+  * Files  – drop files, each gets a status (Ready / to Check / Saved…). One button saves them all.
   * Review – one file up close: which track, which kinds of edits, and a before/after preview where
              judgement calls are flagged and any line can be put back the way it was.
-Everything that is set once (how to save, theme, default edits) lives in Settings.
+Everything that is set once (how to save, theme, default edits) lives in Settings. Dialogs are in dialogs.py,
+background work in workers.py, the look in theme.py / glass.py / widgets.py.
 """
 from __future__ import annotations
 
@@ -13,803 +14,82 @@ import os
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
-                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QPainter, QShortcut
+from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
+                               QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__, batch, media, naming, subformats as sf
+from .. import APP_NAME, __version__, batch, media, naming
 from ..batch import Item
 from ..cleaner import CleanOptions
 from . import glass, theme
+from .dialogs import (LYRIC_MODES, RULES, SUB_MODES, VIDEO_MODES, AboutDialog, DecisionDialog,  # noqa: F401
+                      LockDialog, LogDialog, NameDialog, SettingsDialog, ToolsDialog, ask, lyric_mode, tell,
+                      with_lyric_mode)
+from .glass import GlassDialog, Panel
 from .preview import PreviewPanel
-from .widgets import (two_line_button, FileRow, Legend, OptionRow, RuleRow, ScreenView, Segmented, StatusTag, TrackCard, card, draw_icon,
-                      icon, logo_pixmap, set_prop)
-
-CANCELLED = "__cancelled__"
-
-# Edit types shown in Review (and as defaults in Settings): option key, title, example, rule ids counted
-RULES = [
-    ("brackets", "Sounds in [brackets]", "[door slams], [Grace] Hi.", ("brackets",)),
-    ("parentheses", "Sounds in (parentheses)", "(sighs), (ON PHONE)", ("parentheses",)),
-    ("speaker_labels", "Speaker names", "JOHN: Get down!  →  Get down!", ("labels",)),
-    ("music_cues", "Music cues", "♪ tense music playing ♪, ♪♪", ("music",)),
-    ("dialogue_dashes", "Dialogue dashes", "- Hi. / - Hey.  →  Hi. / Hey.", ("dashes",)),
-    ("onscreen_text", "On-screen text notes", "[sign reads: EXIT]  →  EXIT", ("onscreen",)),
-    ("sound_words", "Sound words", "whoosh, pew pew pew, ka-boom on their own line", ("sound_words",)),
-    ("quote_italics", "Quoted voices → italics", "'Report to Oa.'  →  Report to Oa. (in italics)", ("quotes",)),
-    ("ocr_fixes", "OCR repairs", "Fixes ♪ and “I” misread in disc-converted tracks", ("ocr",)),
-    ("mixed_case_labels", "Every “Name:” label", "Also in files that don't use them throughout (risky)", ()),
-]
-LYRIC_MODES = [("italic", "Italic, no ♪"), ("keep", "Keep ♪"), ("remove", "Remove")]
-VIDEO_MODES = [("replace", "Replace original"), ("new", "New file"), ("sidecar", "Subtitle file")]
-SUB_MODES = [("embed", "Embed in video"), ("replace", "Replace file"), ("new", "New file")]
-THEMES = [("system", "Automatic"), ("light", "Light"), ("dark", "Dark")]
+from .theme import qc
+from .widgets import (T, Banner, Bar, ElidedLabel, FileRow, Legend, LinkButton, RuleRow, ScreenView, Segmented,
+                      StatusTag, Tips, TrackCard, button, draw_icon, hline, icon, icon_button, label, logo_pixmap,
+                      hide_tip, make_menu, refresh_icons, set_prop, set_tip, themed_icon)
+from .workers import (CANCELLED, BatchWorker, Bus, LockCheck, Worker, final_changed, fmt_duration, fmt_size,  # noqa: F401
+                      load_docs, plural)
 
 
-def lyric_mode(o: CleanOptions) -> str:
-    return "remove" if o.lyrics else ("italic" if o.lyric_symbols else "keep")
+class DemoScreen(ScreenView):
+    """The welcome screen's caption: click to play the scrub again."""
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
 
 
-def with_lyric_mode(o: CleanOptions, mode: str) -> CleanOptions:
-    return o.copy(lyrics=mode == "remove", lyric_symbols=mode == "italic")
+class LogoMark(QWidget):
+    """The app's mark in the top bar, with a faint edge in dark mode so it doesn't sink into the bar."""
+
+    def __init__(self, size: int):
+        super().__init__()
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, _):
+        t = T()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.drawPixmap(0, 0, logo_pixmap(self.width()))
+        if t["is_dark"]:
+            from PySide6.QtGui import QPen
+            p.setPen(QPen(qc("rgba(255,255,255,0.14)"), 1))
+            r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            p.drawRoundedRect(r, self.width() * 0.24, self.width() * 0.24)
 
 
-# ============================================================================ plumbing
+class DragVeil(QWidget):
+    """Shown while files are dragged over the window: a soft accent fill, an icon and "Drop to Add"."""
 
-class Bus(QObject):
-    log = Signal(str)
-
-
-class Worker(QThread):
-    progress = Signal(float, str)
-    ok = Signal(object)
-    err = Signal(str)
-
-    def __init__(self, fn, parent=None):
+    def __init__(self, parent):
         super().__init__(parent)
-        self.fn = fn
-        self.cancel = threading.Event()
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.text = "Drop to Add"
+
+    def paintEvent(self, _):
+        t = T()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), qc(theme.alpha(t["bg"], .72)))
+        r = QRectF(self.rect()).adjusted(16, 16, -16, -16)
+        p.setPen(Qt.NoPen)
+        p.setBrush(qc(t["tile_on"]))
+        p.drawRoundedRect(r, 16, 16)
+        c = r.center()
+        p.drawPixmap(int(c.x() - 24), int(c.y() - 52), draw_icon("upload", t["btn"] if not t["is_dark"] else t["acc"], 48))
+        p.setFont(theme.font(22, 700))
+        p.setPen(qc(t["text"]))
+        p.drawText(QRectF(r.left(), c.y() + 6, r.width(), 34), Qt.AlignCenter, self.text)
 
-    def run(self):
-        try:
-            result = self.fn(lambda f, m: self.progress.emit(float(f), m), self.cancel)
-        except media.Cancelled:
-            self.err.emit(CANCELLED)
-            return
-        except Exception as e:  # noqa: BLE001 – surfaced to the user
-            self.err.emit(str(e) or e.__class__.__name__)
-            return
-        self.ok.emit(result)
-
-
-def load_docs(info: media.MediaInfo, paths: dict) -> tuple[dict, dict]:
-    docs, errors = {}, {}
-    for tr in info.subs:
-        if not tr.text_based:
-            continue
-        p = paths.get(tr.index)
-        if not p:
-            errors[tr.index] = "Couldn't read this track."
-            continue
-        try:
-            docs[tr.index] = sf.load(p, tr.fmt)
-        except Exception as e:  # noqa: BLE001
-            errors[tr.index] = str(e)
-    return docs, errors
-
-
-def final_changed(res) -> int:
-    return sum(1 for i, c in enumerate(res.doc.cues) if res.final(i) != c.text)
-
-
-class BatchWorker(QThread):
-    """Cleans and saves every queued file in turn, loading any that haven't been read yet."""
-    started_item = Signal(int, int)            # uid, position
-    item_loaded = Signal(int, object)          # uid, dict
-    item_progress = Signal(int, float, str)
-    item_done = Signal(int, object)
-    item_skipped = Signal(int, str)
-    item_held = Signal(int, str)               # loaded during the save and needs a look first
-    item_failed = Signal(int, str)
-    all_done = Signal(bool)                    # cancelled?
-
-    def __init__(self, jobs: list[dict], cfg: dict, tools: media.Tools, log, parent=None):
-        super().__init__(parent)
-        self.jobs, self.cfg, self.tools, self.log = jobs, cfg, tools, log
-        self.cancel = threading.Event()
-
-    def run(self):
-        cfg = self.cfg
-        for k, job in enumerate(self.jobs):
-            if self.cancel.is_set():
-                break
-            uid = job["uid"]
-            self.started_item.emit(uid, k)
-            prog = lambda f, m, u=uid: self.item_progress.emit(u, float(f), m)
-            try:
-                it = Item(path=job["path"], kind=job["kind"])
-                it.info, it.docs, it.sdh_counts = job["info"], job["docs"], job["sdh_counts"]
-                it.sel, it.manual, it.opts = job["sel"], job["manual"], job["opts"]
-                it.overrides = dict(job["overrides"])
-                it.sidecars, it.dropped = list(job["sidecars"]), set(job["dropped"])
-                fresh = it.info is None or (it.kind == "video" and not it.docs and
-                                            (any(t.text_based for t in it.info.subs) or media.find_sidecars(it.path)))
-                if fresh:
-                    self._load(it, uid, prog)
-                if not it.manual or it.sel not in it.docs:
-                    it.sel = batch.pick_track(it, cfg["pref"])
-                track = it.track()
-                tidy = self._tidy_opts(it, job)
-                if track is None or it.sel not in it.docs:
-                    self._tidy_or_skip(it, uid, tidy, "no text subtitles", prog)
-                    continue
-                if not job["force"] and not track.external and not batch.is_sdh(it, track):
-                    self._tidy_or_skip(it, uid, tidy, "no SDH subtitles (regular subtitles only)", prog)
-                    continue
-                res = batch.clean_item(it, cfg["opts"])
-                policy = job["policy"]
-                unresolved = res.unresolved()
-                if unresolved:
-                    if policy == "hold" or (fresh and policy == "hold_new"):
-                        self.item_held.emit(uid, f"{len(unresolved)} lines to check")
-                        continue
-                    if policy == "orig":
-                        for i in unresolved:
-                            res.overrides[i] = "orig"
-                n = final_changed(res)
-                if n == 0 and not job["force"] and not track.external:
-                    self._tidy_or_skip(it, uid, tidy, "already clean", prog)
-                    continue
-                mode = cfg["video_mode"] if it.kind == "video" else cfg["sub_mode"]
-                note = ""
-                if it.kind == "subtitle" and mode == "embed" and not it.info.companion:
-                    mode, note = "new", " (no matching video, so saved as a subtitle file)"
-                opts = media.SaveOptions(mode=mode, keep_original=cfg["keep"], make_default=cfg["default"],
-                                         track_name=cfg["name"] or "", language=track.language,
-                                         overwrite_sidecar=cfg["overwrite"], recycle_source_sub=cfg["recycle"],
-                                         recycle_paths=batch.removable_sidecars(it, cfg["keep"], mode)
-                                         if cfg["recycle"] and it.kind == "video" else [])
-                if tidy is not None:
-                    opts.drop_other_languages, opts.keep_language = tidy.drop_other_languages, tidy.keep_language
-                    opts.rename_to, opts.rename_sidecars = tidy.rename_to, tidy.rename_sidecars
-                out = media.save(self.tools, it.info, track, res.render(), res.doc.fmt, opts, prog, self.cancel,
-                                 self.log)
-                self._record(it, out.path)
-                self.item_done.emit(uid, {"path": out.path, "note": out.note + note, "changed": n, "sel": it.sel,
-                                          "text": ""})
-            except media.Cancelled:
-                self.item_failed.emit(uid, CANCELLED)
-                break
-            except Exception as e:  # noqa: BLE001
-                self.item_failed.emit(uid, str(e) or e.__class__.__name__)
-        self.all_done.emit(self.cancel.is_set())
-
-    # --- renaming and track tidy-up (only when an original is being replaced)
-    def _tidy_opts(self, it: Item, job: dict):
-        cfg = self.cfg
-        if it.kind != "video" or cfg["video_mode"] != "replace":
-            return None
-        new = job.get("new_name") or ""
-        drop = cfg.get("drop_langs", False) and bool(batch.other_languages(it, cfg.get("keep_lang", "eng")))
-        if not new and not drop:
-            return None
-        side = [t.external for t in it.sidecars if t.external] or media.find_sidecars(it.path)
-        return media.SaveOptions(mode="replace", drop_other_languages=drop, keep_language=cfg.get("keep_lang", "eng"),
-                                 rename_to=new, rename_sidecars=side, make_default=cfg["default"],
-                                 track_name=cfg["name"] or "")
-
-    def _tidy_or_skip(self, it: Item, uid: int, tidy, why: str, prog):
-        if tidy is None:
-            self.item_skipped.emit(uid, why)
-            return
-        out = media.tidy_or_rename(self.tools, it.info, tidy, prog, self.cancel, self.log)
-        self._record(it, out.path)
-        self.item_done.emit(uid, {"path": out.path, "note": out.note, "changed": 0, "sel": it.sel, "text": "tidy"})
-
-    def _record(self, it: Item, new_path: str):
-        if os.path.normcase(new_path) != os.path.normcase(it.path):
-            naming.record_rename(self.cfg.get("batch_id", ""), it.path, new_path)
-
-    def _load(self, it: Item, uid: int, prog):
-        payload = {}
-        if it.kind == "subtitle":
-            info, doc = media.probe_subtitle_file(it.path)
-            it.info, it.docs = info, {0: doc}
-        else:
-            prog(-1, "Opening")
-            it.info = media.probe(self.tools, it.path, self.log)
-            tmp = tempfile.mkdtemp(prefix="subscrub_")
-            paths = media.extract_subs(self.tools, it.info, it.info.subs, tmp,
-                                       lambda f, m: prog(f, "Reading subtitles"), self.cancel, self.log)
-            it.docs, payload["errors"] = load_docs(it.info, paths)
-            payload["tmpdir"] = tmp
-            batch.attach_sidecars(it, self.log)
-        batch.measure(it)
-        payload.update(info=it.info, docs=it.docs, sdh_counts=it.sdh_counts, sidecars=it.sidecars)
-        self.item_loaded.emit(uid, payload)
-
-
-def fmt_size(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
-            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
-        n /= 1024
-    return ""
-
-
-def fmt_duration(sec: float) -> str:
-    if not sec:
-        return ""
-    sec = int(round(sec))
-    h, m, s = sec // 3600, sec % 3600 // 60, sec % 60
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-
-
-def plural(n: int, word: str, many: str | None = None) -> str:
-    return f"{n:,} {word if n == 1 else (many or word + 's')}"
-
-
-# ============================================================================ dialogs
-
-class LogDialog(QDialog):
-    def __init__(self, text: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Activity log")
-        self.resize(760, 460)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 18, 18, 18)
-        lay.setSpacing(12)
-        hint = QLabel("Commands SubScrub ran and what the tools said. Handy if something goes wrong.")
-        hint.setObjectName("Hint")
-        lay.addWidget(hint)
-        self.box = QPlainTextEdit(text or "Nothing yet.")
-        self.box.setObjectName("Log")
-        self.box.setReadOnly(True)
-        self.box.setLineWrapMode(QPlainTextEdit.NoWrap)
-        lay.addWidget(self.box, 1)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        copy = QPushButton("Copy")
-        copy.clicked.connect(lambda: QApplication.clipboard().setText(self.box.toPlainText()))
-        row.addWidget(copy)
-        close = QPushButton("Close")
-        close.setObjectName("Primary")
-        close.clicked.connect(self.accept)
-        row.addWidget(close)
-        lay.addLayout(row)
-        theme.apply_titlebar(self, parent.t if parent else theme.palette_for("system"))
-
-
-class ToolsDialog(QDialog):
-    WINGET = {"ffmpeg": "Gyan.FFmpeg", "mkvmerge": "MoritzBunkus.MKVToolNix"}
-
-    def __init__(self, win: "MainWindow"):
-        super().__init__(win)
-        self.win = win
-        self.setWindowTitle("Tools")
-        self.setMinimumWidth(620)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 20, 22, 20)
-        lay.setSpacing(14)
-        t = QLabel("Tools SubScrub uses")
-        t.setObjectName("CardTitle")
-        lay.addWidget(t)
-        h = QLabel("FFmpeg is required. MKVToolNix is optional but recommended: it's the most faithful way to "
-                   "rewrite MKV files (keeps every tag, chapter and attachment exactly as they were).")
-        h.setObjectName("Hint")
-        h.setWordWrap(True)
-        lay.addWidget(h)
-        self.grid = QGridLayout()
-        self.grid.setHorizontalSpacing(12)
-        self.grid.setVerticalSpacing(10)
-        lay.addLayout(self.grid)
-        self.rows = {}
-        for r, (key, label) in enumerate((("ffmpeg", "FFmpeg"), ("ffprobe", "FFprobe"), ("mkvmerge", "MKVToolNix"))):
-            name = QLabel(label)
-            name.setObjectName("OptTitle")
-            status = QLabel()
-            path = QLabel()
-            path.setObjectName("Faint")
-            path.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            browse = QPushButton("Browse…")
-            browse.clicked.connect(lambda _=False, k=key: self.browse(k))
-            self.grid.addWidget(name, r, 0)
-            self.grid.addWidget(status, r, 1)
-            self.grid.addWidget(path, r, 2)
-            self.grid.addWidget(browse, r, 3)
-            self.rows[key] = (status, path)
-        self.grid.setColumnStretch(2, 1)
-
-        row = QHBoxLayout()
-        if media.IS_WIN:
-            for key, label in (("ffmpeg", "Install FFmpeg"), ("mkvmerge", "Install MKVToolNix")):
-                b = QPushButton(label)
-                b.setToolTip(f"Runs: winget install -e --id {self.WINGET[key]}")
-                b.clicked.connect(lambda _=False, k=key: self.win.winget_install(self.WINGET[k]))
-                row.addWidget(b)
-        else:
-            row.addWidget(QLabel("Install ffmpeg and mkvtoolnix with your package manager."))
-        row.addStretch(1)
-        rescan = QPushButton("Re-scan")
-        rescan.clicked.connect(self.rescan)
-        row.addWidget(rescan)
-        done = QPushButton("Done")
-        done.setObjectName("Primary")
-        done.clicked.connect(self.accept)
-        row.addWidget(done)
-        lay.addLayout(row)
-        self.refresh()
-        theme.apply_titlebar(self, win.t)
-
-    def refresh(self):
-        tools = self.win.tools
-        for key, (status, path) in self.rows.items():
-            p = getattr(tools, key)
-            if p:
-                status.setText("✓  " + (media.tool_version(p) or "found"))
-                status.setStyleSheet(f"color: {self.win.t['green']}; font-weight: 600;")
-                path.setText(p)
-            else:
-                status.setText("Not found" if key != "mkvmerge" else "Not found (optional)")
-                status.setStyleSheet(f"color: {self.win.t['amber' if key != 'mkvmerge' else 'faint']}; font-weight: 600;")
-                path.setText("")
-
-    def rescan(self):
-        self.win.rescan_tools()
-        self.refresh()
-
-    def browse(self, key):
-        exe = "Programs (*.exe)" if media.IS_WIN else "All files (*)"
-        p, _ = QFileDialog.getOpenFileName(self, f"Locate {key}", "", exe)
-        if p:
-            self.win.settings.setValue(f"tools/{key}", p)
-            self.rescan()
-
-
-class SettingsDialog(QDialog):
-    """Everything that's set once: how files are saved, the default edits, appearance."""
-
-    def __init__(self, win: "MainWindow"):
-        super().__init__(win)
-        self.win = win
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(600)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body = QWidget()
-        lay = QVBoxLayout(body)
-        lay.setContentsMargins(24, 20, 24, 12)
-        lay.setSpacing(8)
-        scroll.setWidget(body)
-        outer.addWidget(scroll, 1)
-
-        def section(text):
-            lay.addSpacing(10)
-            s = QLabel(text)
-            s.setObjectName("Section")
-            lay.addWidget(s)
-
-        sw = {"on": win.t["accent"], "off": win.t["sw_off"], "knob": "#FFFFFF", "knob_off": win.t["sw_knob_off"]}
-
-        section("Videos")
-        self.video_mode = Segmented(VIDEO_MODES)
-        self.video_mode.set_value(win.video_mode)
-        lay.addWidget(self.video_mode)
-        self.video_hint = QLabel()
-        self.video_hint.setObjectName("Hint")
-        self.video_hint.setWordWrap(True)
-        lay.addWidget(self.video_hint)
-        self.default_row = OptionRow("Make the cleaned track the default", "Jellyfin and players pick it automatically",
-                                     win.make_default)
-        self.keep_row = OptionRow("Keep the SDH track too", "Off: the SDH track is replaced by the clean one",
-                                  win.keep_sdh)
-        for r in (self.default_row, self.keep_row):
-            r.set_colors(sw)
-            lay.addWidget(r)
-        nl = QLabel("Track name")
-        nl.setObjectName("OptTitle")
-        lay.addWidget(nl)
-        self.name_edit = QLineEdit(win.track_name)
-        self.name_edit.setPlaceholderText("Automatic: the language, e.g. “English”")
-        lay.addWidget(self.name_edit)
-
-        section("Subtitle files (.srt, .ass)")
-        self.recycle_row = OptionRow("One file per video",
-                                     "Subtitle files next to a video (Movie.eng.srt) are cleaned into the video and "
-                                     "then moved to the Recycle Bin, along with other files in the same language.",
-                                     win.recycle_sub)
-        self.recycle_row.set_colors(sw)
-        lay.addWidget(self.recycle_row)
-        sl = QLabel("Subtitle files with no matching video, or when you add just the .srt:")
-        sl.setObjectName("Hint")
-        sl.setWordWrap(True)
-        lay.addWidget(sl)
-        self.sub_mode = Segmented(SUB_MODES)
-        self.sub_mode.set_value(win.sub_mode)
-        lay.addWidget(self.sub_mode)
-
-        section("Names and tracks")
-        self.rename_row = OptionRow("Rename videos to their TMDB title",
-                                    "“Batman V Super Dawn of Justice 2160 HDR.mkv” becomes “Batman v Superman - Dawn "
-                                    "of Justice.mkv”; episodes become “Show S1 E1.mkv”. Files stay in "
-                                    "their folder. Only when replacing originals.", win.rename_on)
-        self.year_row = OptionRow("Add the year to movie names", "“Dune (2021).mkv” instead of “Dune.mkv”",
-                                  win.name_year)
-        self.langs_row = OptionRow("Remove subtitles in other languages",
-                                   "Keeps English, forced tracks (any language) and tracks with no language set.",
-                                   win.drop_langs)
-        for r in (self.rename_row, self.year_row, self.langs_row):
-            r.set_colors(sw)
-        lay.addWidget(self.rename_row)
-        lay.addWidget(self.year_row)
-        kl = QLabel("TMDB API key")
-        kl.setObjectName("OptTitle")
-        lay.addWidget(kl)
-        self.key_edit = QLineEdit(win.tmdb_key)
-        self.key_edit.setPlaceholderText("Paste your API key or read access token")
-        self.key_edit.setEchoMode(QLineEdit.PasswordEchoOnEdit)
-        lay.addWidget(self.key_edit)
-        kh = QLabel("Free: sign in at themoviedb.org, then Settings → API → Create. Titles are looked up there; "
-                    "nothing else is sent.")
-        kh.setObjectName("Hint")
-        kh.setWordWrap(True)
-        lay.addWidget(kh)
-        lay.addSpacing(4)
-        lay.addWidget(self.langs_row)
-        self.rename_row.toggled.connect(lambda *_: self._hints())
-
-        section("Default edits")
-        h = QLabel("What gets cleaned out of every file. You can still change these for one file in Review.")
-        h.setObjectName("Hint")
-        h.setWordWrap(True)
-        lay.addWidget(h)
-        self.rule_rows = {}
-        d = win.defaults
-        for key, title, desc, _ in RULES:
-            r = OptionRow(title, desc, getattr(d, key))
-            r.set_colors(sw)
-            self.rule_rows[key] = r
-            lay.addWidget(r)
-        lr = QHBoxLayout()
-        ll = QLabel("Song lyrics")
-        ll.setObjectName("OptTitle")
-        lr.addWidget(ll)
-        lr.addStretch(1)
-        self.lyrics = Segmented(LYRIC_MODES)
-        self.lyrics.setFixedWidth(300)
-        self.lyrics.set_value(lyric_mode(d))
-        lr.addWidget(self.lyrics)
-        lay.addLayout(lr)
-
-        section("Appearance and safety")
-        tr = QHBoxLayout()
-        tl = QLabel("Theme")
-        tl.setObjectName("OptTitle")
-        tr.addWidget(tl)
-        tr.addStretch(1)
-        self.theme = Segmented(THEMES)
-        self.theme.setFixedWidth(300)
-        self.theme.set_value(win.theme_mode)
-        self.theme.changed.connect(win.set_theme)
-        tr.addWidget(self.theme)
-        lay.addLayout(tr)
-        th = QLabel("Automatic follows Windows' light/dark setting, live.")
-        th.setObjectName("Hint")
-        lay.addWidget(th)
-        self.confirm_row = OptionRow("Ask before rewriting files in place", "", win.confirm_replace)
-        self.confirm_row.set_colors(sw)
-        lay.addWidget(self.confirm_row)
-        self.glass_row = OptionRow("Use Windows' Mica backdrop (Windows 11)", "Tints the window with your wallpaper "
-                                   "instead of SubScrub's own backdrop. Applies the next time SubScrub starts.",
-                                   win.glass)
-        self.glass_row.set_colors(sw)
-        self.glass_row.setVisible(glass.system_backdrop_supported())
-        lay.addWidget(self.glass_row)
-        tools_row = QHBoxLayout()
-        tb = QPushButton("Tools && paths…")
-        tb.clicked.connect(win.show_tools)
-        lb = QPushButton("Activity log")
-        lb.clicked.connect(win.show_log)
-        tools_row.addWidget(tb)
-        tools_row.addWidget(lb)
-        tools_row.addStretch(1)
-        lay.addSpacing(6)
-        lay.addLayout(tools_row)
-        lay.addStretch(1)
-
-        foot = QFrame()
-        foot.setObjectName("Footer")
-        fl = QHBoxLayout(foot)
-        fl.setContentsMargins(24, 12, 24, 12)
-        reset = QPushButton("Restore defaults")
-        reset.setObjectName("Ghost")
-        reset.clicked.connect(self.restore)
-        fl.addWidget(reset)
-        fl.addStretch(1)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        ok = QPushButton("Save")
-        ok.setObjectName("Primary")
-        ok.clicked.connect(self.accept)
-        fl.addWidget(cancel)
-        fl.addWidget(ok)
-        outer.addWidget(foot)
-
-        self.video_mode.changed.connect(lambda *_: self._hints())
-        self.keep_row.toggled.connect(lambda *_: self._hints())
-        self.default_row.toggled.connect(lambda *_: self._hints())
-        self._hints()
-        self.resize(640, min(860, int(QApplication.primaryScreen().availableGeometry().height() * 0.86))
-                    if QApplication.primaryScreen() else 820)
-        theme.apply_titlebar(self, win.t)
-
-    def _hints(self):
-        m = self.video_mode.value()
-        keep, default = self.keep_row.isChecked(), self.default_row.isChecked()
-        if m == "replace":
-            t = (f"Rewrites the video with the cleaned track{' as the default' if default else ''}"
-                 f"{', keeping the SDH track as a backup' if keep else ' in place of the SDH track'}. "
-                 "The new file is checked before the old one goes to the Recycle Bin.")
-        elif m == "new":
-            t = "Saves “Movie.dialogue.mkv” next to the original, which isn't touched."
-        else:
-            t = "Saves “Movie.en.srt” next to the video — nothing is remuxed. Players load it automatically."
-        self.video_hint.setText(t)
-        for r in (self.keep_row, self.default_row):
-            r.setEnabled(m != "sidecar")
-        self.rename_row.setEnabled(m == "replace")
-        self.year_row.setEnabled(m == "replace" and self.rename_row.isChecked())
-        self.key_edit.setEnabled(self.rename_row.isChecked())
-        self.langs_row.setEnabled(m != "sidecar")
-
-    def restore(self):
-        d = CleanOptions()
-        for key, r in self.rule_rows.items():
-            r.setChecked(getattr(d, key))
-        self.lyrics.set_value(lyric_mode(d))
-        self.video_mode.set_value("replace")
-        self.sub_mode.set_value("embed")
-        self.default_row.setChecked(True)
-        self.keep_row.setChecked(False)
-        self.recycle_row.setChecked(True)
-        self.name_edit.setText("")
-        self.rename_row.setChecked(True)
-        self.year_row.setChecked(False)
-        self.langs_row.setChecked(True)
-        self._hints()
-
-    def options(self) -> CleanOptions:
-        o = CleanOptions(**{k: r.isChecked() for k, r in self.rule_rows.items()})
-        return with_lyric_mode(o, self.lyrics.value())
-
-
-class DecisionDialog(QDialog):
-    """Asked at save time when some files have judgement calls."""
-
-    def __init__(self, win: "MainWindow", flagged: list[Item], others: int, unseen: int):
-        super().__init__(win)
-        self.choice = None
-        self.setWindowTitle("Some lines need a decision")
-        self.setMinimumWidth(560)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 22, 24, 20)
-        lay.setSpacing(12)
-        n = sum(len(i.result.unresolved()) for i in flagged if i.result)
-        t = QLabel(f"{plural(len(flagged), 'file')} {'has' if len(flagged) == 1 else 'have'} "
-                   f"{plural(n, 'line')} SubScrub isn't sure about")
-        t.setObjectName("CardTitle")
-        t.setWordWrap(True)
-        lay.addWidget(t)
-        names = "\n".join(f"•  {i.name}  —  {plural(len(i.result.unresolved()), 'line')}" for i in flagged[:6])
-        if len(flagged) > 6:
-            names += f"\n•  …and {len(flagged) - 6} more"
-        lst = QLabel(names)
-        lst.setObjectName("Hint")
-        lst.setWordWrap(True)
-        lay.addWidget(lst)
-        h = QLabel("These are things like words in (parentheses) that might be dialogue, or text the regular "
-                   "subtitles in the same file disagree with.")
-        h.setObjectName("Hint")
-        h.setWordWrap(True)
-        lay.addWidget(h)
-        lay.addSpacing(4)
-
-        def option(key, title, desc, primary=False):
-            b = two_line_button(title, desc, "Choice" if not primary else "ChoicePrimary")
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda: self._pick(key))
-            lay.addWidget(b)
-            return b
-
-        option("review", "Review them now", "Opens the first one with just those lines listed.", primary=True)
-        option("guess", "Save with SubScrub's best guess", "Apply every edit, including the uncertain ones.")
-        option("orig", "Save, but leave those lines alone", "Uncertain lines stay exactly as they were.")
-        if others:
-            option("skip", f"Only save the other {plural(others, 'file')}", "Come back to these later.")
-        if unseen:
-            note = QLabel(f"{plural(unseen, 'file')} still being read will follow the same choice.")
-            note.setObjectName("Faint")
-            lay.addWidget(note)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        c = QPushButton("Cancel")
-        c.clicked.connect(self.reject)
-        row.addWidget(c)
-        lay.addLayout(row)
-        theme.apply_titlebar(self, win.t)
-
-    def _pick(self, key):
-        self.choice = key
-        self.accept()
-
-
-class NameDialog(QDialog):
-    """Pick which title a video is, when SubScrub isn't sure (or the user disagrees)."""
-
-    def __init__(self, win: "MainWindow", it: Item, api: naming.TMDB, with_year: bool):
-        super().__init__(win)
-        self.pick = None
-        self.it, self.api, self.with_year = it, api, with_year
-        self.ext = Path(it.path).suffix
-        self.setWindowTitle("Choose the title")
-        self.setMinimumWidth(580)
-        self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(24, 22, 24, 20)
-        self.lay.setSpacing(10)
-        t = QLabel(f"Which title is “{it.name}”?")
-        t.setObjectName("CardTitle")
-        t.setWordWrap(True)
-        self.lay.addWidget(t)
-        h = QLabel("Pick the closest match. The file is renamed to the title shown under it.")
-        h.setObjectName("Hint")
-        h.setWordWrap(True)
-        self.lay.addWidget(h)
-        self.box = QVBoxLayout()
-        self.box.setSpacing(6)
-        self.lay.addLayout(self.box)
-        self.note = QLabel("")
-        self.note.setObjectName("Faint")
-        self.note.setWordWrap(True)
-        self.lay.addWidget(self.note)
-        sr = QHBoxLayout()
-        self.q = QLineEdit()
-        self.q.setPlaceholderText("Search TMDB by title")
-        self.q.setText(it.match.parsed.title if it.match else "")
-        self.q.returnPressed.connect(self.search)
-        sr.addWidget(self.q, 1)
-        b = QPushButton("Search")
-        b.clicked.connect(self.search)
-        sr.addWidget(b)
-        self.lay.addLayout(sr)
-        row = QHBoxLayout()
-        keep = QPushButton("Keep current name")
-        keep.clicked.connect(lambda: self._set("keep"))
-        row.addWidget(keep)
-        row.addStretch(1)
-        c = QPushButton("Cancel")
-        c.clicked.connect(self.reject)
-        row.addWidget(c)
-        self.lay.addLayout(row)
-        self.show_choices(it.match.choices if it.match else [])
-        theme.apply_titlebar(self, win.t)
-
-    def show_choices(self, choices: list):
-        while self.box.count():
-            w = self.box.takeAt(0).widget()
-            if w:
-                w.deleteLater()
-        for c in choices[:6]:
-            new = naming.render(c, self.ext, self.with_year)
-            b = two_line_button(c.label(), new, "NameChoice")
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, ch=c: self._set(ch))
-            self.box.addWidget(b)
-        self.note.setText("" if choices else "No matches. Try a different title below.")
-        self.note.setVisible(bool(self.note.text()))
-
-    def search(self):
-        text = self.q.text().strip()
-        if not text:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            kind = "episode" if self.it.match and self.it.match.parsed.is_episode else "movie"
-            self.show_choices(naming.search(self.api, text, kind, self.it.match.parsed))
-        except naming.LookupError_ as e:
-            self.note.setText(str(e))
-            self.note.setVisible(True)
-        finally:
-            QApplication.restoreOverrideCursor()
-
-    def _set(self, pick):
-        self.pick = pick
-        self.accept()
-
-
-class LockDialog(QDialog):
-    """Shown before saving when files that would be changed are open in another program (e.g. seeding)."""
-
-    def __init__(self, win: "MainWindow", locked: dict[str, list[str]], items: list[Item]):
-        super().__init__(win)
-        self.choice = None
-        self.setWindowTitle("Some files are in use")
-        W = 560
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 22, 24, 20)
-        lay.setSpacing(12)
-        lay.setSizeConstraint(QVBoxLayout.SetFixedSize)
-
-        def label(text, name):
-            lb = QLabel(text)
-            lb.setObjectName(name)
-            lb.setWordWrap(True)
-            lb.setFixedWidth(W)
-            lay.addWidget(lb)
-            return lb
-
-        progs: dict[str, int] = {}
-        for names in locked.values():
-            for n in names:
-                progs[n] = progs.get(n, 0) + 1
-        who = " and ".join(sorted(progs, key=lambda n: -progs[n]))
-        label(f"{plural(len(items), 'file')} {'is' if len(items) == 1 else 'are'} open in {who}", "CardTitle")
-        fm = self.fontMetrics()
-        names = "\n".join("•  " + fm.elidedText(i.name, Qt.ElideMiddle, W - 30) for i in items[:8])
-        if len(items) > 8:
-            names += f"\n•  …and {len(items) - 8} more"
-        label(names, "Hint")
-        label("SubScrub can't rewrite a file while another program has it open. If you're seeding these, pause "
-              "those torrents now, then click Check again. Nothing has been changed yet.", "Hint")
-        label("Once a file is rewritten its torrent can't seed it anymore (the contents no longer match) — remove "
-              "the torrent afterwards and keep the files. To keep seeding the original, use Settings → Videos → "
-              "New file instead.", "Faint")
-        lay.addSpacing(4)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        skip = QPushButton(f"Skip {'it' if len(items) == 1 else 'these'}")
-        skip.clicked.connect(lambda: self._pick("skip"))
-        again = QPushButton("Check again")
-        again.setObjectName("Primary")
-        again.setDefault(True)
-        again.clicked.connect(lambda: self._pick("again"))
-        row.addWidget(cancel)
-        row.addWidget(skip)
-        row.addWidget(again)
-        lay.addLayout(row)
-        theme.apply_titlebar(self, win.t)
-
-    def _pick(self, key):
-        self.choice = key
-        self.accept()
-
-
-class LockCheck(QThread):
-    done = Signal(object)          # {path: [programs]}
-
-    def __init__(self, paths, parent=None):
-        super().__init__(parent)
-        self.paths = paths
-
-    def run(self):
-        try:
-            self.done.emit(media.who_has_open(self.paths))
-        except Exception:  # noqa: BLE001
-            self.done.emit({})
-
-
-# ============================================================================ main window
 
 class MainWindow(QMainWindow):
     PAGE_WELCOME, PAGE_FILES, PAGE_REVIEW = 0, 1, 2
@@ -819,6 +99,8 @@ class MainWindow(QMainWindow):
         self.settings = QSettings(APP_NAME, APP_NAME)
         self.theme_mode = self.settings.value("theme", "system")
         self.t = theme.palette_for(self.theme_mode)
+        theme.set_current(self.t)
+        Tips.install(QApplication.instance())
         self.bus = Bus()
         self.bus.log.connect(self._append_log)
         self.log_lines: list[str] = []
@@ -834,9 +116,11 @@ class MainWindow(QMainWindow):
         self._tmdb = None
         self.loading_uid: int | None = None
         self.batch_worker: BatchWorker | None = None
+        self._saving = False                      # set before the save thread starts, cleared when it's done
         self.batch_total = 0
         self.batch_pos = 0
         self.last_output: str | None = None
+        self.add_note = ""
         self._recalc: list[int] = []
         self._winget_procs: list[subprocess.Popen] = []
         self._preview_key = None
@@ -853,6 +137,10 @@ class MainWindow(QMainWindow):
         self._lock_timer.setSingleShot(True)
         self._lock_timer.setInterval(400)
         self._lock_timer.timeout.connect(self.check_locks)
+        self._summary_timer = QTimer(self)        # many changes in one go → one summary update
+        self._summary_timer.setSingleShot(True)
+        self._summary_timer.setInterval(0)
+        self._summary_timer.timeout.connect(self._do_update_summary)
         self._lock_thread: LockCheck | None = None
 
         self.setWindowTitle(APP_NAME)
@@ -862,7 +150,6 @@ class MainWindow(QMainWindow):
         self.glass_wanted = self.glass and glass.system_backdrop_supported()
         if self.glass_wanted:
             self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.panels: list = []
         self._build()
         self.apply_theme()
         geo = self.settings.value("geometry")
@@ -882,6 +169,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Shift+F3"), self, activated=lambda: self.preview.step(-1))
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.toggle_current_line)
         QShortcut(QKeySequence("Escape"), self, activated=lambda: self.show_files() if self.page() == 2 else None)
+        QShortcut(QKeySequence("Alt+Left"), self, activated=lambda: self.show_files() if self.page() == 2 else None)
         QShortcut(QKeySequence("Ctrl+,"), self, activated=self.show_settings)
         try:
             QApplication.styleHints().colorSchemeChanged.connect(
@@ -903,7 +191,7 @@ class MainWindow(QMainWindow):
         return self.item(self.review_uid)
 
     def busy(self) -> bool:
-        return bool(self.batch_worker and self.batch_worker.isRunning())
+        return self._saving or bool(self.batch_worker and self.batch_worker.isRunning())
 
     def page(self) -> int:
         return self.stack.currentIndex()
@@ -957,12 +245,13 @@ class MainWindow(QMainWindow):
     def _build(self):
         root = glass.GlassRoot()
         root.setObjectName("Root")
+        root.setFocusPolicy(Qt.ClickFocus)           # the window starts with focus here: no control shows a ring
         self.root = root
         self.setCentralWidget(root)
         v = QVBoxLayout(root)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        v.addWidget(self._build_header())
+        v.addWidget(self._build_topbar())
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_welcome())
         self.stack.addWidget(self._build_files())
@@ -971,73 +260,74 @@ class MainWindow(QMainWindow):
         self.footer = self._build_footer()
         v.addWidget(self.footer)
         self.footer.hide()
-
-        self.veil = QFrame(root)
-        self.veil.setObjectName("DragVeil")
-        self.veil.setAttribute(Qt.WA_TransparentForMouseEvents)
-        vl = QVBoxLayout(self.veil)
-        self.veil_label = QLabel("Drop to add")
-        self.veil_label.setObjectName("DragVeilText")
-        self.veil_label.setAlignment(Qt.AlignCenter)
-        vl.addWidget(self.veil_label)
+        self.veil = DragVeil(root)
         self.veil.hide()
 
-    def _panel(self, radius: float = 12, strong: bool = False) -> "glass.GlassPanel":
-        p = glass.GlassPanel(radius, strong=strong)
-        self.panels.append(p)
+    def _panel(self, radius: float = 12, strong: bool = False) -> Panel:
+        p = Panel(radius, strong=strong)
+        self.root.register(p)
         return p
 
-    def _build_header(self):
-        h = QFrame()
-        h.setObjectName("Header")
-        lay = QHBoxLayout(h)
-        lay.setContentsMargins(20, 6, 12, 2)         # the title bar above already shows the icon and name
-        lay.setSpacing(6)
+    def _build_topbar(self):
+        bar = Bar("bottom")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(20, 10, 16, 10)
+        lay.setSpacing(18)
+        brand = QHBoxLayout()
+        brand.setSpacing(10)
+        brand.addWidget(LogoMark(28))
+        brand.addWidget(label(APP_NAME, "Brand"))
+        lay.addLayout(brand)
+        self.tabs = Segmented([("files", "Files"), ("review", "Review")], tabs=True)
+        self.tabs.changed.connect(self._tab_changed)
+        lay.addWidget(self.tabs, 0, Qt.AlignVCenter)
         lay.addStretch(1)
-        self.tools_pill = QPushButton()
-        self.tools_pill.setObjectName("Pill")
-        self.tools_pill.setCursor(Qt.PointingHandCursor)
-        self.tools_pill.clicked.connect(self.show_tools)
-        lay.addWidget(self.tools_pill)
-        lay.addSpacing(4)
-        self.settings_btn = QToolButton()
-        self.settings_btn.setObjectName("IconButton")
-        self.settings_btn.setToolTip("Settings (Ctrl+,)")
-        self.settings_btn.setCursor(Qt.PointingHandCursor)
-        self.settings_btn.clicked.connect(self.show_settings)
-        lay.addWidget(self.settings_btn)
-        self.more_btn = QToolButton()
-        self.more_btn.setObjectName("IconButton")
-        self.more_btn.setPopupMode(QToolButton.InstantPopup)
-        self.more_btn.setCursor(Qt.PointingHandCursor)
-        self.more_btn.setToolTip("More")
-        menu = QMenu(self)
-        menu.addAction("Settings…", self.show_settings)
-        menu.addAction("Tools && paths…", self.show_tools)
-        menu.addAction("Activity log", self.show_log)
-        menu.addAction("Undo last renames…", self.undo_renames)
-        menu.addSeparator()
-        menu.addAction(f"About {APP_NAME}", self.show_about)
-        self.more_btn.setMenu(menu)
-        lay.addWidget(self.more_btn)
-        return h
+        acts = QHBoxLayout()
+        acts.setSpacing(4)
+        self.tools_btn = button("Tools Ready", "subtle", "sm", self.show_tools, icon_kind="check", icon_role="text2")
+        acts.addWidget(self.tools_btn)
+        acts.addSpacing(4)
+        self.theme_btn = icon_button("sun", "Switch to light mode", self._toggle_theme)
+        acts.addWidget(self.theme_btn)
+        self.settings_btn = icon_button("gear", "Settings (Ctrl+,)", self.show_settings)
+        acts.addWidget(self.settings_btn)
+        self.more_btn = icon_button("more", "More", self._show_more)
+        self.more_menu = make_menu(self)
+        self._menu_actions = [
+            ("gear", self.more_menu.addAction("Settings…", self.show_settings)),
+            ("restart", self.more_menu.addAction("Tools and Paths…", self.show_tools)),
+            ("log", self.more_menu.addAction("Activity Log", self.show_log)),
+            ("history", self.more_menu.addAction("Undo Last Renames…", self.undo_renames)),
+        ]
+        self.more_menu.addSeparator()
+        self._menu_actions.append(("info", self.more_menu.addAction(f"About {APP_NAME}", self.show_about)))
+        acts.addWidget(self.more_btn)
+        lay.addLayout(acts)
+        self.topbar = bar
+        return bar
+
+    def _show_more(self):
+        b = self.more_btn
+        self.more_menu.adjustSize()
+        pos = b.mapToGlobal(QPoint(b.width() - self.more_menu.sizeHint().width(), b.height() + 6))
+        self.more_menu.exec(pos)
 
     def _build_welcome(self):
         page = QWidget()
         outer = QVBoxLayout(page)
         outer.setContentsMargins(40, 24, 40, 40)
         outer.addStretch(2)
-        colw = self._panel(16, strong=True)
-        colw.setFixedWidth(760)
-        col = QVBoxLayout(colw)
-        col.setContentsMargins(40, 38, 40, 36)
+        card = self._panel(12)
+        card.setFixedWidth(760)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(40, 36, 40, 34)
         col.setSpacing(0)
         # the one bold moment: a caption on a dark screen losing its sound tag
-        self.demo = ScreenView(height=230)
+        self.demo = DemoScreen(height=220)
         self.demo.demo = ("[door creaks]", "Hello? Is anyone there?")
         self.demo.setCursor(Qt.PointingHandCursor)
-        self.demo.setToolTip("Click to play again")
-        self.demo.mouseReleaseEvent = lambda e: self.play_demo(0)
+        set_tip(self.demo, "Click to play again")
+        self.demo.clicked.connect(lambda: self.play_demo(0))
         col.addWidget(self.demo)
         self._demo_anim = QPropertyAnimation(self.demo, b"demo_t", self)
         self._demo_anim.setDuration(1700)
@@ -1045,42 +335,31 @@ class MainWindow(QMainWindow):
         self._demo_anim.setEndValue(2.0)
         self._demo_anim.setEasingCurve(QEasingCurve.InOutCubic)
         col.addSpacing(30)
-        t = QLabel("Drop videos, folders or subtitle files")
-        t.setObjectName("Hero")
-        col.addWidget(t)
+        col.addWidget(label("Drop videos, folders or subtitle files", "Hero"))
         col.addSpacing(10)
-        sub = QLabel("SubScrub takes the sound descriptions, speaker names and music cues out of SDH subtitles, "
-                     "then puts the cleaned track back into the video. You check anything it isn't sure about.")
-        sub.setObjectName("HeroSub")
-        sub.setWordWrap(True)
-        col.addWidget(sub)
+        col.addWidget(label("SubScrub takes the sound descriptions, speaker names and music cues out of SDH subtitles, "
+                            "then puts the cleaned track back into the video. You check anything it isn't sure about.",
+                            "HeroSub", True))
         col.addSpacing(26)
         row = QHBoxLayout()
         row.setSpacing(10)
-        b = QPushButton("Choose files")
-        b.setObjectName("Primary")
-        b.setCursor(Qt.PointingHandCursor)
-        b.clicked.connect(self.choose_files)
-        row.addWidget(b)
-        f = QPushButton("Choose a folder")
-        f.setObjectName("Secondary")
-        f.setCursor(Qt.PointingHandCursor)
-        f.clicked.connect(self.choose_folder)
-        row.addWidget(f)
+        self.choose_btn = button("Choose Files", "primary", "", self.choose_files)
+        card.glow.append(self.choose_btn)
+        row.addWidget(self.choose_btn)
+        row.addWidget(button("Choose a Folder", "", "", self.choose_folder))
         row.addStretch(1)
-        note = QLabel("MKV, MP4, MOV, WebM, .srt, .ass, .vtt")
-        note.setObjectName("Faint")
-        row.addWidget(note, 0, Qt.AlignVCenter)
+        row.addWidget(label("MKV, MP4, MOV, WebM, .srt, .ass, .vtt", "Faint"), 0, Qt.AlignVCenter)
         col.addLayout(row)
-        col.addSpacing(22)
-        self.welcome_banner = self._banner(
-            "FFmpeg isn't installed yet. SubScrub needs it to read and write video files.",
-            "Set up FFmpeg", self.show_tools, tone="warn")
-        col.addWidget(self.welcome_banner)
-        outer.addWidget(colw, 0, Qt.AlignHCenter)
+        self.welcome_banner_wrap = QWidget()
+        wl = QVBoxLayout(self.welcome_banner_wrap)
+        wl.setContentsMargins(0, 22, 0, 0)
+        self.welcome_banner = Banner("FFmpeg isn't installed yet. SubScrub needs it to read and write video files.",
+                                     "Set Up FFmpeg", self.show_tools, tone="warn")
+        wl.addWidget(self.welcome_banner)
+        col.addWidget(self.welcome_banner_wrap)
+        outer.addWidget(card, 0, Qt.AlignHCenter)
         outer.addStretch(3)
-        self.drop = colw
-        self.drop_icon = QLabel()            # kept for older callers; the screen replaces the upload glyph
+        self.drop = card
         return page
 
     def play_demo(self, delay: int = 500):
@@ -1090,29 +369,10 @@ class MainWindow(QMainWindow):
         self.demo.setDemo(0.0)
         QTimer.singleShot(delay, self._demo_anim.start)
 
-    def _banner(self, text, button_text=None, slot=None, tone="info"):
-        f = QFrame()
-        f.setObjectName("Banner")
-        f.setProperty("tone", tone)
-        lay = QHBoxLayout(f)
-        lay.setContentsMargins(14, 10, 10, 10)
-        lay.setSpacing(10)
-        f.icon = QLabel()
-        lay.addWidget(f.icon, 0, Qt.AlignTop)
-        f.label = QLabel(text)
-        f.label.setWordWrap(True)
-        lay.addWidget(f.label, 1)
-        if button_text:
-            btn = QPushButton(button_text)
-            btn.clicked.connect(slot)
-            lay.addWidget(btn, 0, Qt.AlignVCenter)
-            f.button = btn
-        return f
-
     def _build_files(self):
         page = QWidget()
         outer = QHBoxLayout(page)
-        outer.setContentsMargins(32, 28, 32, 10)
+        outer.setContentsMargins(32, 28, 32, 12)
         outer.addStretch(1)
         colw = QWidget()
         colw.setMaximumWidth(1120)
@@ -1125,39 +385,23 @@ class MainWindow(QMainWindow):
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        t = QLabel("Files")
-        t.setObjectName("PageTitle")
-        head.addWidget(t, 0, Qt.AlignBottom)
-        head.addSpacing(4)
-        self.files_count = QLabel()
-        self.files_count.setObjectName("Count")
-        head.addWidget(self.files_count, 0, Qt.AlignBottom)
-        head.addStretch(1)
-        self.clear_btn = QPushButton("Clear list")
-        self.clear_btn.setObjectName("Ghost")
-        self.clear_btn.setCursor(Qt.PointingHandCursor)
-        self.clear_btn.clicked.connect(self.clear_all)
-        head.addWidget(self.clear_btn)
-        for text, slot in (("Add files", self.choose_files), ("Add folder", self.choose_folder)):
-            b = QPushButton(text)
-            b.setObjectName("Secondary")
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(slot)
-            head.addWidget(b)
+        ttl = QVBoxLayout()
+        ttl.setSpacing(4)
+        ttl.addWidget(label("Files", "H1"))
+        self.summary = label("", "Sub", True)
+        ttl.addWidget(self.summary)
+        head.addLayout(ttl, 1)
+        self.clear_btn = button("Clear List", "subtle", "", self.clear_all)
+        head.addWidget(self.clear_btn, 0, Qt.AlignBottom)
+        head.addWidget(button("Add Files", "", "", self.choose_files, icon_kind="add-file"), 0, Qt.AlignBottom)
+        head.addWidget(button("Add Folder", "", "", self.choose_folder, icon_kind="add-folder"), 0, Qt.AlignBottom)
         col.addLayout(head)
-        col.addSpacing(8)
-
-        self.summary = QLabel()
-        self.summary.setObjectName("Summary")
-        self.summary.setWordWrap(True)
-        col.addWidget(self.summary)
-        self.add_note_label = QLabel()
-        self.add_note_label.setObjectName("Faint")
-        self.add_note_label.setWordWrap(True)
+        self.add_note_label = label("", "Hint", True)
+        self.add_note_label.setContentsMargins(0, 6, 0, 0)
         self.add_note_label.hide()
         col.addWidget(self.add_note_label)
         col.addSpacing(16)
-        self.lock_banner = self._banner("", "Check again", lambda: self.check_locks(force=True), tone="warn")
+        self.lock_banner = Banner("", "Check Again", lambda: self.check_locks(force=True), tone="warn")
         self.lock_banner.hide()
         col.addWidget(self.lock_banner)
         self.lock_gap = QWidget()
@@ -1171,12 +415,12 @@ class MainWindow(QMainWindow):
         fw = QWidget()
         self.files_box = QVBoxLayout(fw)
         self.files_box.setContentsMargins(0, 0, 0, 0)
-        self.files_box.setSpacing(2)
+        self.files_box.setSpacing(0)
         self.files_box.addStretch(1)
         self.files_scroll.setWidget(fw)
         fp = self._panel(12)
         fl = QVBoxLayout(fp)
-        fl.setContentsMargins(8, 8, 4, 8)
+        fl.setContentsMargins(0, 6, 2, 6)
         fl.addWidget(self.files_scroll)
         self.files_panel = fp
         self.files_inner = fw
@@ -1184,14 +428,11 @@ class MainWindow(QMainWindow):
 
         how = QHBoxLayout()
         how.setContentsMargins(0, 12, 0, 0)
-        self.save_how = QLabel()
-        self.save_how.setObjectName("Faint")
-        self.save_how.setWordWrap(True)
+        how.setSpacing(12)
+        self.save_how = label("", "Faint", True)
         how.addWidget(self.save_how, 1)
-        ch = QPushButton("Change")
-        ch.setObjectName("Link")
-        ch.setCursor(Qt.PointingHandCursor)
-        ch.clicked.connect(self.show_settings)
+        ch = LinkButton("Change", size=12.5)
+        ch.clicked.connect(lambda: self.show_settings("videos"))
         how.addWidget(ch, 0, Qt.AlignTop)
         col.addLayout(how)
         col.addStretch(1)                       # the card hugs its rows; spare space goes below
@@ -1206,199 +447,159 @@ class MainWindow(QMainWindow):
         for i in range(lay.count()):
             w = lay.itemAt(i).widget()
             if w is not None and not w.isHidden():
-                hint = w.heightForWidth(self.files_scroll.viewport().width()) if w.hasHeightForWidth() else -1
-                h += max(hint, w.sizeHint().height(), w.minimumSizeHint().height()) + lay.spacing()
-        h = max(h, self.files_box.minimumSize().height(), self.files_box.sizeHint().height())
+                h += max(w.sizeHint().height(), w.minimumSizeHint().height())
         m = self.files_panel.layout().contentsMargins()
-        h += m.top() + m.bottom() + 4
-        self.files_panel.setMaximumHeight(max(80, h))
+        h += m.top() + m.bottom() + 2
+        self.files_panel.setMaximumHeight(max(60, h))
 
     def _build_review(self):
         page = QWidget()
         body = QHBoxLayout(page)
-        body.setContentsMargins(16, 14, 0, 14)
-        body.setSpacing(0)
+        body.setContentsMargins(16, 16, 16, 12)
+        body.setSpacing(16)
 
         # ---- sidebar: which track, which kinds of edits
-        side = self._panel(12, strong=True)
-        side.setObjectName("Sidebar")
-        side.setFixedWidth(384)
+        side = self._panel(12)
+        side.setFixedWidth(356)
         self.left = side
         sv = QVBoxLayout(side)
         sv.setContentsMargins(0, 0, 0, 0)
         sv.setSpacing(0)
-        top = QHBoxLayout()
-        top.setContentsMargins(14, 14, 14, 6)
-        self.back_btn = QPushButton(" All files")
-        self.back_btn.setObjectName("Back")
-        self.back_btn.setCursor(Qt.PointingHandCursor)
-        self.back_btn.setToolTip("Back to the file list (Esc)")
-        self.back_btn.clicked.connect(self.show_files)
-        top.addWidget(self.back_btn)
-        top.addStretch(1)
-        sv.addLayout(top)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
         col = QVBoxLayout(inner)
-        col.setContentsMargins(24, 10, 20, 24)
+        col.setContentsMargins(18, 16, 16, 18)
         col.setSpacing(0)
         scroll.setWidget(inner)
         sv.addWidget(scroll, 1)
 
-        def section(text, right: QLabel | None = None):
+        def section(text, right: QLabel):
             row = QHBoxLayout()
             row.setSpacing(8)
-            lab = QLabel(text)
-            lab.setObjectName("Section")
-            row.addWidget(lab)
+            row.addWidget(label(text, "CardTitle"))
             row.addStretch(1)
-            if right is not None:
-                row.addWidget(right, 0, Qt.AlignBottom)
+            row.addWidget(right, 0, Qt.AlignBottom)
             col.addLayout(row)
 
-        self.track_count = QLabel()
-        self.track_count.setObjectName("SectionNote")
-        section("Subtitle track", self.track_count)
-        col.addSpacing(4)
-        self.file_meta = QLabel()
-        self.file_meta.setObjectName("Hint")
-        self.file_meta.setWordWrap(True)
+        self.track_count = label("", "SecSub")
+        section("Subtitle Track", self.track_count)
+        col.addSpacing(2)
+        self.file_meta = label("", "Hint", True)
         col.addWidget(self.file_meta)
-        col.addSpacing(14)
+        col.addSpacing(10)
         self.tracks_box = QVBoxLayout()
         self.tracks_box.setSpacing(8)
         col.addLayout(self.tracks_box)
-        self.tracks_note = QLabel()
-        self.tracks_note.setObjectName("Hint")
-        self.tracks_note.setWordWrap(True)
-        self.tracks_note.setContentsMargins(0, 12, 0, 0)
+        self.tracks_note = label("", "Hint", True)
+        self.tracks_note.setContentsMargins(0, 10, 0, 0)
         self.tracks_note.hide()
         col.addWidget(self.tracks_note)
-        col.addSpacing(34)
+        col.addSpacing(18)
+        col.addWidget(hline())
+        col.addSpacing(16)
 
-        self.edits_state = QLabel()
-        self.edits_state.setObjectName("SectionNote")
-        section("What to remove", self.edits_state)
-        col.addSpacing(8)
+        self.edits_state = label("", "SecSub")
+        section("What to Remove", self.edits_state)
+        col.addSpacing(6)
         self.rule_rows: dict[str, RuleRow] = {}
         for key, title, desc, _ in RULES:
             r = RuleRow(title, desc)
             r.toggled.connect(lambda *_: self._rule_timer.start())
             self.rule_rows[key] = r
             col.addWidget(r)
-        col.addSpacing(18)
+        col.addSpacing(10)
         lr = QHBoxLayout()
         lr.setSpacing(8)
-        ll = QLabel("Song lyrics")
-        ll.setObjectName("OptTitle")
-        lr.addWidget(ll)
-        self.lyric_count = QLabel()
-        self.lyric_count.setObjectName("RuleCount")
-        lr.addWidget(self.lyric_count)
+        lr.addWidget(label("Song Lyrics", "OptTitle"))
         lr.addStretch(1)
+        self.lyric_count = label("", "RuleCount")
+        self.lyric_count.setFont(theme.num_font(theme.font(13, 600)))
+        lr.addWidget(self.lyric_count)
         col.addLayout(lr)
         col.addSpacing(8)
-        self.lyrics_seg = Segmented(LYRIC_MODES)
+        self.lyrics_seg = Segmented(LYRIC_MODES, wide=True)
         self.lyrics_seg.changed.connect(lambda *_: self._rule_timer.start())
         col.addWidget(self.lyrics_seg)
-        col.addSpacing(18)
+        col.addSpacing(14)
         links = QHBoxLayout()
-        self.make_default_btn = QPushButton("Use these for all files")
-        self.make_default_btn.setObjectName("Link")
-        self.make_default_btn.setCursor(Qt.PointingHandCursor)
+        self.make_default_btn = LinkButton("Use These for All Files")
         self.make_default_btn.clicked.connect(self.promote_review_rules)
-        self.reset_rules_btn = QPushButton("Back to defaults")
-        self.reset_rules_btn.setObjectName("LinkQuiet")
-        self.reset_rules_btn.setCursor(Qt.PointingHandCursor)
+        self.reset_rules_btn = LinkButton("Back to Defaults")
         self.reset_rules_btn.clicked.connect(self.reset_review_rules)
         links.addWidget(self.make_default_btn)
         links.addStretch(1)
         links.addWidget(self.reset_rules_btn)
         col.addLayout(links)
-        col.addStretch(1)
-        body.addWidget(side)
+        self.side_inner = inner
+        body.addWidget(side, 0, Qt.AlignTop)
 
         # ---- main: the file, what will change, and the preview
         main = QWidget()
         v = QVBoxLayout(main)
-        v.setContentsMargins(30, 12, 28, 0)
+        v.setContentsMargins(4, 0, 0, 0)
         v.setSpacing(0)
         bar = QHBoxLayout()
         bar.setSpacing(12)
-        self.review_title = QLabel()
-        self.review_title.setObjectName("PageTitle")
-        self.review_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.review_title = ElidedLabel("", "H1", Qt.ElideMiddle)
         bar.addWidget(self.review_title, 1)
         self.review_status = StatusTag()
         bar.addWidget(self.review_status, 0, Qt.AlignVCenter)
-        self.review_chip = self.review_status          # older name
-        bar.addSpacing(6)
-        self.prev_file = QToolButton()
-        self.next_file = QToolButton()
-        for b, tip, d in ((self.prev_file, "Previous file", -1), (self.next_file, "Next file", 1)):
-            b.setObjectName("IconButton")
-            b.setToolTip(tip)
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, d=d: self.step_file(d))
-            bar.addWidget(b)
+        self.prev_file = icon_button("chev-up", "Previous file", lambda: self.step_file(-1), "sm")
+        self.next_file = icon_button("chev-down", "Next file", lambda: self.step_file(1), "sm")
+        nav2 = QHBoxLayout()
+        nav2.setSpacing(2)
+        nav2.addWidget(self.prev_file)
+        nav2.addWidget(self.next_file)
+        bar.addLayout(nav2)
         v.addLayout(bar)
-        v.addSpacing(4)
-        self.review_detail = QLabel()
-        self.review_detail.setObjectName("Summary")
-        self.review_detail.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        v.addSpacing(2)
+        self.review_detail = label("", "Sub", True)
         v.addWidget(self.review_detail)
-        self.name_btn = QPushButton()
-        self.name_btn.setObjectName("LinkQuiet")
-        self.name_btn.setCursor(Qt.PointingHandCursor)
-        self.name_btn.setFlat(True)
-        self.name_btn.setStyleSheet("text-align: left;")
+        self.name_row = QWidget()
+        nr = QHBoxLayout(self.name_row)
+        nr.setContentsMargins(0, 4, 0, 0)
+        nr.setSpacing(8)
+        self.name_icon = QLabel()
+        self.name_icon.setFixedSize(15, 15)
+        themed_icon(self.name_icon, "arrow-right", "text2", 15)
+        nr.addWidget(self.name_icon)
+        self.name_label = label("", "")
+        self.name_label.setFont(theme.font(13))
+        nr.addWidget(self.name_label)
+        self.name_btn = LinkButton("Change Title")
         self.name_btn.clicked.connect(lambda: self.choose_name())
-        self.name_btn.hide()
-        v.addWidget(self.name_btn, 0, Qt.AlignLeft)
-        self.review_notes = QLabel()
-        self.review_notes.setObjectName("Hint")
-        self.review_notes.setWordWrap(True)
-        self.review_notes.setContentsMargins(0, 6, 0, 0)
-        self.review_notes.hide()
-        v.addWidget(self.review_notes)
-        self.notes_banner = self._banner("", tone="info")          # kept for older callers; notes are a hint now
-        self.notes_banner.hide()
-        self.nosdh_banner = self._banner("This file only has regular subtitles, with no sound descriptions or "
-                                         "speaker names to strip, so it's skipped when saving.", "Clean anyway",
-                                         self.force_clean, tone="info")
-        self.nosdh_banner.hide()
+        nr.addWidget(self.name_btn)
+        nr.addStretch(1)
+        self.name_row.hide()
+        v.addWidget(self.name_row)
+        self.nosdh_wrap = QWidget()
+        nl = QVBoxLayout(self.nosdh_wrap)
+        nl.setContentsMargins(0, 12, 0, 0)
+        self.nosdh_banner = Banner("", "Clean Anyway", self.force_clean, tone="info")
+        nl.addWidget(self.nosdh_banner)
+        self.nosdh_wrap.hide()
+        v.addWidget(self.nosdh_wrap)
         v.addSpacing(14)
-        v.addWidget(self.nosdh_banner)
-        v.addSpacing(6)
 
         ph = QHBoxLayout()
         ph.setSpacing(14)
-        self.filter = Segmented([("check", "To check"), ("changes", "Changes"), ("all", "Everything")])
+        self.filter = Segmented([("check", "To Check"), ("changes", "Changes"), ("all", "Everything")])
         self.filter.changed.connect(self._filter_changed)
         ph.addWidget(self.filter)
         self.legend = Legend()
         ph.addWidget(self.legend, 1)
-        self.chips = {}                                   # legacy: counts now live in the legend
-        self.undo_btn = QPushButton(" Keep original")
-        self.undo_btn.setObjectName("Ghost")
-        self.undo_btn.setCursor(Qt.PointingHandCursor)
-        self.undo_btn.setToolTip("Put the selected line back the way it was (Ctrl+Z, or double-click a line)")
-        self.undo_btn.setMinimumWidth(136)
-        self.undo_btn.clicked.connect(self.toggle_current_line)
+        self.undo_btn = button("Keep Original", "", "sm", self.toggle_current_line, icon_kind="undo",
+                               tip="Put the selected line back the way it was (Ctrl+Z, or double-click a line)")
+        self.undo_btn.setMinimumWidth(132)
         ph.addWidget(self.undo_btn)
         nav = QHBoxLayout()
-        nav.setSpacing(0)
-        self.prev_btn, self.next_btn = QToolButton(), QToolButton()
-        for b, tip in ((self.prev_btn, "Previous change (Shift+F3)"), (self.next_btn, "Next change (F3)")):
-            b.setObjectName("IconButton")
-            b.setToolTip(tip)
-            b.setCursor(Qt.PointingHandCursor)
-        self.prev_btn.clicked.connect(lambda: self.preview.step(-1))
-        self.next_btn.clicked.connect(lambda: self.preview.step(1))
-        self.nav_count = QLabel()
-        self.nav_count.setObjectName("NavCount")
+        nav.setSpacing(2)
+        self.prev_btn = icon_button("chev-up", "Previous change (Shift+F3)", lambda: self.preview.step(-1), "sm")
+        self.next_btn = icon_button("chev-down", "Next change (F3)", lambda: self.preview.step(1), "sm")
+        self.nav_count = label("", "Muted")
+        self.nav_count.setFont(theme.num_font(theme.font(13, 600)))
         self.nav_count.setMinimumWidth(78)
         self.nav_count.setAlignment(Qt.AlignCenter)
         nav.addWidget(self.prev_btn)
@@ -1406,12 +607,10 @@ class MainWindow(QMainWindow):
         nav.addWidget(self.next_btn)
         ph.addLayout(nav)
         v.addLayout(ph)
-        v.addSpacing(14)
+        v.addSpacing(12)
         self.preview_stack = QStackedWidget()
-        self.preview_empty = QLabel("Pick a subtitle track to see what will change.")
-        self.preview_empty.setObjectName("Empty")
+        self.preview_empty = label("Pick a subtitle track to see what will change.", "Empty", True)
         self.preview_empty.setAlignment(Qt.AlignCenter)
-        self.preview_empty.setWordWrap(True)
         self.preview = PreviewPanel()
         self.preview.position_changed.connect(self._update_nav)
         self.preview.list.toggle_requested.connect(self.toggle_line)
@@ -1419,22 +618,20 @@ class MainWindow(QMainWindow):
         self.preview_stack.addWidget(self.preview)
         pp = self._panel(12)
         pl = QVBoxLayout(pp)
-        pl.setContentsMargins(4, 4, 4, 4)
+        pl.setContentsMargins(6, 6, 4, 4)
         pl.addWidget(self.preview_stack)
         v.addWidget(pp, 1)
         body.addWidget(main, 1)
         return page
 
     def _build_footer(self):
-        f = QFrame()
-        f.setObjectName("Footer")
+        f = Bar("top")
         lay = QHBoxLayout(f)
-        lay.setContentsMargins(20, 12, 18, 12)
-        lay.setSpacing(12)
+        lay.setContentsMargins(20, 12, 20, 12)
+        lay.setSpacing(10)
         col = QVBoxLayout()
         col.setSpacing(6)
-        self.status = QLabel("")
-        self.status.setObjectName("Status")
+        self.status = label("", "Status")
         col.addWidget(self.status)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -1443,29 +640,21 @@ class MainWindow(QMainWindow):
         col.addWidget(self.progress, 0, Qt.AlignLeft)
         lay.addLayout(col)
         lay.addStretch(1)
-        self.open_btn = QPushButton("Show in folder")
-        self.open_btn.setObjectName("Ghost")
-        self.open_btn.setCursor(Qt.PointingHandCursor)
-        self.open_btn.clicked.connect(lambda: self.last_output and media.open_in_explorer(self.last_output))
+        self.open_btn = button("Show in Folder", "subtle", "",
+                               lambda: self.last_output and media.open_in_explorer(self.last_output),
+                               icon_kind="folder-open", icon_role="text2")
         self.open_btn.hide()
         lay.addWidget(self.open_btn)
-        self.cancel_btn = QPushButton("Stop")
-        self.cancel_btn.setObjectName("Danger")
-        self.cancel_btn.setMinimumWidth(150)
-        self.cancel_btn.clicked.connect(self.cancel_save)
+        self.cancel_btn = button("Stop", "danger", "", self.cancel_save, icon_kind="stop", icon_role="bad")
+        self.cancel_btn.setMinimumWidth(120)
         self.cancel_btn.hide()
         lay.addWidget(self.cancel_btn)
-        self.save_one_btn = QPushButton("Save this file")
-        self.save_one_btn.setCursor(Qt.PointingHandCursor)
-        self.save_one_btn.setMinimumWidth(140)
-        self.save_one_btn.clicked.connect(lambda: self.start_save(only=self.review_uid))
+        self.save_one_btn = button("Save This File", "", "", lambda: self.start_save(only=self.review_uid))
         lay.addWidget(self.save_one_btn)
-        self.save_btn = QPushButton("Clean and save")
-        self.save_btn.setObjectName("Primary")
-        self.save_btn.setCursor(Qt.PointingHandCursor)
-        self.save_btn.setMinimumWidth(190)
-        self.save_btn.clicked.connect(lambda: self.start_save())
+        self.save_btn = button("Clean and Save", "primary", "", lambda: self.start_save())
+        self.save_btn.setMinimumWidth(180)
         lay.addWidget(self.save_btn)
+        f.glow = [self.save_btn]
         return f
 
     # ------------------------------------------------------------------ theme
@@ -1474,38 +663,34 @@ class MainWindow(QMainWindow):
         self.settings.setValue("theme", mode)
         self.apply_theme()
 
+    def _toggle_theme(self):
+        self.set_theme("light" if self.t["is_dark"] else "dark")
+
     def apply_theme(self):
         t = self.t = theme.palette_for(self.theme_mode)
+        theme.set_current(t)
         app = QApplication.instance()
         app.setPalette(theme.qpalette(t))
         app.setStyleSheet(theme.stylesheet(t))
         self.root.set_theme(t, self.sysglass)
-        for pnl in self.panels:
-            pnl.set_theme(t)
-        sw = {"on": t["accent"], "off": t["sw_off"], "knob": "#FFFFFF", "knob_off": t["sw_knob_off"]}
-        for r in self.rule_rows.values():
-            r.set_colors(sw)
-        for c in self.cards.values():
-            c.set_colors(t["accent"], t["radio_off"])
-        for r in self.rows.values():
-            r.set_theme(t)
-        self.demo.set_theme(t)
-        self.more_btn.setIcon(icon("more", t["dim"], 20))
-        self.settings_btn.setIcon(icon("gear", t["dim"], 20))
-        self.back_btn.setIcon(icon("back", t["dim"], 18))
-        self.prev_file.setIcon(icon("chev-up", t["dim"], 18))
-        self.next_file.setIcon(icon("chev-down", t["dim"], 18))
-        self.undo_btn.setIcon(icon("undo", t["dim"], 16))
-        self.welcome_banner.icon.setPixmap(draw_icon("alert", t["accent"], 18))
-        self.notes_banner.icon.setPixmap(draw_icon("flag", t["dim"], 18))
-        self.nosdh_banner.icon.setPixmap(draw_icon("alert", t["dim"], 18))
-        self.lock_banner.icon.setPixmap(draw_icon("alert", t["accent"], 18))
+        refresh_icons()
+        dark = t["is_dark"]
+        themed_icon(self.theme_btn, "sun" if dark else "moon", "text2", 18)
+        set_tip(self.theme_btn, "Switch to light mode" if dark else "Switch to dark mode")
+        self.theme_btn.setAccessibleName(self.theme_btn.toolTip())
+        for kind, act in self._menu_actions:
+            act.setIcon(icon(kind, t["text2"], 16))
         self.preview.set_theme(t)
-        self.prev_btn.setIcon(icon("chev-up", t["dim"], 18))
-        self.next_btn.setIcon(icon("chev-down", t["dim"], 18))
         self._update_tools_pill()
+        for it in self.items:
+            self._update_row(it)
         self._preview_key = None
         self.render_review()
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, GlassDialog) and w.isVisible():
+                w.refresh_backdrop()
+        for w in self.findChildren(QWidget):
+            w.update()
         theme.apply_titlebar(self, t, self.sysglass)
 
     def showEvent(self, e):
@@ -1514,26 +699,55 @@ class MainWindow(QMainWindow):
             self.sysglass = glass.enable_system_backdrop(self, self.t["is_dark"])
             self.root.set_theme(self.t, self.sysglass)
         theme.apply_titlebar(self, self.t, self.sysglass)
+        QTimer.singleShot(0, lambda: self.root.setFocus(Qt.OtherFocusReason))
         if not getattr(self, "_demo_played", False) and self.page() == self.PAGE_WELCOME:
             self._demo_played = True
             self.play_demo(700)
 
+    # ------------------------------------------------------------------ tabs
+    def _tab_changed(self, key: str):
+        if key == "files":
+            self.show_files()
+            return
+        uid = self._review_target()
+        if uid is None or self.busy():
+            self._sync_tabs()
+            return
+        self.show_review(uid)
+
+    def _review_target(self) -> int | None:
+        if self.item(self.review_uid) is not None:
+            return self.review_uid
+        for test in (lambda i: i.result is not None and bool(i.result.unresolved()) and i.pending,
+                     lambda i: i.loaded, lambda i: True):
+            it = next((i for i in self.items if test(i)), None)
+            if it is not None:
+                return it.uid
+        return None
+
+    def _sync_tabs(self):
+        self.tabs.set_count("files", len(self.items) if self.items else None)
+        self.tabs.set_option_enabled("review", bool(self.items) and not self.busy())
+        want = "review" if self.page() == self.PAGE_REVIEW else "files"
+        if self.tabs.value() != want:
+            self.tabs.set_value(want)
+
     # ------------------------------------------------------------------ tools
     def _update_tools_pill(self):
         tl = self.tools
+        b = self.tools_btn
         if not tl.ready:
-            self.tools_pill.setText(" FFmpeg needed")
-            self.tools_pill.setIcon(icon("alert", self.t["accent"], 14))
-            set_prop(self.tools_pill, "tone", "bad")
-            self.tools_pill.setToolTip("FFmpeg wasn't found. Click to set it up.")
+            b.setText(" FFmpeg Needed")
+            set_prop(b, "kind", "attn")
+            themed_icon(b, "alert", "btn_fg", 15)
+            set_tip(b, "FFmpeg wasn't found. Click to set it up.")
         else:
-            self.tools_pill.setText(" Tools ready" if tl.mkvmerge else " FFmpeg ready")
-            self.tools_pill.setIcon(icon("check", self.t["dim"], 14))
-            set_prop(self.tools_pill, "tone", "")
-            self.tools_pill.setToolTip("FFmpeg and MKVToolNix found. MKVToolNix is used for MKV files."
-                                       if tl.mkvmerge else
-                                       "FFmpeg found. Installing MKVToolNix is recommended for MKV files.")
-        self.welcome_banner.setVisible(not tl.ready)
+            b.setText(" Tools Ready" if tl.mkvmerge else " FFmpeg Ready")
+            set_prop(b, "kind", "subtle")
+            themed_icon(b, "check", "text2", 15)
+            set_tip(b, "FFmpeg and MKVToolNix found. MKVToolNix is used for MKV files."
+                    if tl.mkvmerge else "FFmpeg found. Installing MKVToolNix is recommended for MKV files.")
+        self.welcome_banner_wrap.setVisible(not tl.ready)
         self._update_buttons()
 
     def rescan_tools(self):
@@ -1548,11 +762,9 @@ class MainWindow(QMainWindow):
 
     def winget_install(self, package_id: str):
         if not shutil.which("winget"):
-            QMessageBox.information(
-                self, "winget not available",
-                "Windows Package Manager (winget) isn't available on this PC.\n\n"
-                "Download FFmpeg from https://www.gyan.dev/ffmpeg/builds/ or MKVToolNix from "
-                "https://mkvtoolnix.download/, then use Browse… to point SubScrub at it.")
+            tell(self, "winget isn't available", "Windows Package Manager (winget) isn't available on this PC.",
+                 "Download FFmpeg from https://www.gyan.dev/ffmpeg/builds/ or MKVToolNix from "
+                 "https://mkvtoolnix.download/, then use Browse… to point SubScrub at it.")
             return
         cmd = ["winget", "install", "-e", "--id", package_id,
                "--accept-source-agreements", "--accept-package-agreements"]
@@ -1587,16 +799,13 @@ class MainWindow(QMainWindow):
             self._new_name(it) or self._lang_drops(it))
 
     def _tidy_note(self, it: Item) -> str:
+        """What else happens to the file. The new name is on its own line (the arrow), so it isn't repeated here."""
         if not self._has_tidy(it):
             return ""
-        bits = []
-        if self._new_name(it):
-            bits.append("will be renamed")
         n = len(self._lang_drops(it))
-        if n:
-            bits.append(f"{plural(n, 'other-language subtitle track')} will be removed")
-        text = " and ".join(bits)
-        return text[:1].upper() + text[1:] + "."
+        if not n:
+            return ""
+        return f"{plural(n, 'other-language subtitle track')} will be removed"
 
     def _api(self) -> naming.TMDB:
         if self._tmdb is None:
@@ -1649,7 +858,8 @@ class MainWindow(QMainWindow):
         self._update_buttons()
 
     def name_line(self, it: Item) -> tuple[str, str]:
-        """(text, tone) for the line under a file's name."""
+        """(text, tone) for the line under a file's name: the new name (shown with an arrow), or where the title
+        lookup stands."""
         if it.kind != "video" or not self._renaming() or it.state in ("done", "saving", "queued", "probing", "reading"):
             return "", ""
         st = it.name_state
@@ -1663,11 +873,11 @@ class MainWindow(QMainWindow):
             return "Keeping this name", "faint"
         new = self._new_name(it)
         if new:
-            return "Rename to " + new, ""
+            return new, ""
         if batch.name_choice(it) is not None:
             return "", ""                                  # the name is already right
         if batch.name_unsure(it):
-            return "Not sure which title this is — choose one in Review", "alert"
+            return "Not sure which title this is, choose one in Review", "alert"
         return "No title match found, keeping this name", "faint"
 
     def choose_name(self, uid: int | None = None):
@@ -1688,14 +898,14 @@ class MainWindow(QMainWindow):
             return
         rows = naming.last_batch()
         if not rows:
-            QMessageBox.information(self, "Nothing to undo", "There are no recent renames to undo.")
+            tell(self, "Nothing to undo", "There are no recent renames to undo.")
             return
-        ans = QMessageBox.question(
-            self, "Undo last renames",
-            f"Put the original names back on {plural(len(rows), 'file')} from {rows[0]['time']}?\n\n"
-            "Only the names change back. Removed subtitle tracks and originals in the Recycle Bin stay as they are.",
-            QMessageBox.Yes | QMessageBox.Cancel)
-        if ans != QMessageBox.Yes:
+        choice, _ = ask(self, "Undo the last renames?",
+                        f"Put the original names back on {plural(len(rows), 'file')} from {rows[0]['time']}?",
+                        [("cancel", "Cancel", ""), ("go", "Undo Renames", "primary")],
+                        "Only the names change back. Removed subtitle tracks and originals in the Recycle Bin stay "
+                        "as they are.")
+        if choice != "go":
             return
         done, problems = 0, []
         for r in rows:
@@ -1721,16 +931,18 @@ class MainWindow(QMainWindow):
         if not problems:
             naming.mark_undone(rows[0]["batch"])
         self.log(f"Undid {done} rename(s)")
-        QMessageBox.information(self, "Undo last renames",
-                                f"{plural(done, 'file')} renamed back." +
-                                (("\n\nNot changed:\n" + "\n".join(problems[:8])) if problems else ""))
+        if problems:
+            tell(self, "Some names couldn't be put back", f"{plural(done, 'file')} renamed back. Not changed:",
+                 rows=[(p_, "") for p_ in problems[:8]])
+        else:
+            tell(self, "Renames undone", f"{plural(done, 'file')} renamed back.")
 
     # ------------------------------------------------------------------ settings, log, about
-    def show_settings(self):
+    def show_settings(self, section: str = "videos"):
         if self.busy():
             return
         old_theme = self.theme_mode
-        dlg = SettingsDialog(self)
+        dlg = SettingsDialog(self, section if isinstance(section, str) else "videos")
         if dlg.exec() != QDialog.Accepted:
             if self.theme_mode != old_theme:
                 self.set_theme(old_theme)
@@ -1780,17 +992,14 @@ class MainWindow(QMainWindow):
         LogDialog("\n".join(self.log_lines), self).exec()
 
     def show_about(self):
-        QMessageBox.about(self, f"About {APP_NAME}",
-                          f"<b>{APP_NAME} {__version__}</b><br><br>Removes sound descriptions, speaker names and music "
-                          "cues from SDH subtitles, then puts the cleaned track back into your videos as the default — "
-                          "without re-encoding.<br><br>Uses FFmpeg and MKVToolNix.")
+        AboutDialog(self).exec()
 
     # ------------------------------------------------------------------ drag & drop
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls() and any(u.isLocalFile() for u in e.mimeData().urls()) and not self.busy():
             e.acceptProposedAction()
-            self.veil_label.setText("Drop to add" if self.items else "Drop to open")
-            self.veil.setGeometry(self.root.rect().adjusted(12, 12, -12, -12))
+            self.veil.text = "Drop to Add" if self.items else "Drop to Open"
+            self.veil.setGeometry(self.root.rect())
             self.veil.raise_()
             self.veil.show()
 
@@ -1829,12 +1038,12 @@ class MainWindow(QMainWindow):
             return
         files, skipped = batch.expand_paths(paths)
         if skipped:
-            QMessageBox.information(self, "Picture subtitles",
-                                    "These are picture-based subtitle files (Blu-ray/DVD), which can't be edited as "
-                                    "text:\n\n" + "\n".join(os.path.basename(p) for p in skipped[:8]))
+            tell(self, "Picture subtitles can't be cleaned",
+                 "These are picture-based subtitle files (Blu-ray or DVD), which can't be edited as text:",
+                 rows=[(os.path.basename(p_), "") for p_ in skipped[:8]])
         if not files:
             if paths and not skipped:
-                QMessageBox.information(self, "Nothing to add", "No video or subtitle files were found there.")
+                tell(self, "Nothing to add", "No video or subtitle files were found there.")
             return
         explicit = {p for p in paths if os.path.isfile(p)}
         known = {i.path for i in self.items if i.kind == "video" and i.pending}
@@ -1842,15 +1051,14 @@ class MainWindow(QMainWindow):
         files = plan.videos + plan.subtitles
         if not files:
             if plan.orphans:
-                QMessageBox.information(self, "Nothing to add", "Only subtitle files without a matching video "
-                                        "were found there.")
+                tell(self, "Nothing to add", "Only subtitle files without a matching video were found there.")
             return
         videos = list(plan.videos)
         if videos and not self.tools.ready:
             self.rescan_tools()
             if not self.tools.ready:
-                QMessageBox.warning(self, "FFmpeg needed",
-                                    "SubScrub needs FFmpeg to read video files. Set it up, then add them again.")
+                tell(self, "FFmpeg is needed", "SubScrub needs FFmpeg to read video files. Set it up, then add them "
+                     "again.")
                 self.show_tools()
                 files = [f for f in files if f not in videos] if not self.tools.ready else files
                 if not files:
@@ -1868,7 +1076,6 @@ class MainWindow(QMainWindow):
             it.dropped = set(plan.dropped_with.get(f, []))
             self.items.append(it)
             row = FileRow(it.uid, it.name, it.kind == "subtitle")
-            row.set_theme(self.t)
             row.clicked.connect(self.open_review)
             row.remove_clicked.connect(self._remove_item)
             self.rows[it.uid] = row
@@ -1890,10 +1097,17 @@ class MainWindow(QMainWindow):
 
     def _layout_files(self):
         n = len(self.items)
-        self.files_count.setText(str(n) if n else "")
         self.clear_btn.setVisible(n > 1)
+        first = True
+        for i in range(self.files_box.count()):
+            w = self.files_box.itemAt(i).widget()
+            if isinstance(w, FileRow):
+                w.sep = not first
+                first = False
+                w.update()
         for it in self.items:
             self._update_row(it)
+        self._sync_tabs()
         self._update_summary()
 
     def _remove_item(self, uid: int, refresh: bool = True):
@@ -2089,49 +1303,50 @@ class MainWindow(QMainWindow):
                 "Cleaned and saved" if same or not out else f"Saved as {out}")
             return what, "Saved", "done", False
         if st == "failed":
-            return it.message or "Something went wrong", "Failed", "failed", bool(it.info)
+            return it.message[:1].upper() + it.message[1:] if it.message else "Something went wrong", "Failed", \
+                "failed", bool(it.info)
         tr = it.track()
         info = it.info
         if info is None:
             return "Couldn't read this file", "Failed", "failed", False
+        has_tidy = self._has_tidy(it)
+        tidy = self._tidy_note(it)
         if tr is None:
             if info.subs and not any(t.text_based for t in it.tracks()):
-                return "Only picture-based subtitles (PGS or VobSub), which would need OCR", "Can't edit", "dim", True
-            tidy = self._tidy_note(it)
-            if tidy:
-                return tidy, "Ready", "ready", False
-            return "No subtitles in this file or next to it", "Nothing to do", "dim", False
-        label = self.track_label(it, tr)
+                return "Only picture-based subtitles (PGS or VobSub), which would need OCR", "Can't Edit", "dim", True
+            if has_tidy:
+                return (tidy[:1].upper() + tidy[1:]) if tidy else "No subtitles; only the name changes", \
+                    "Ready", "ready", False
+            return "No subtitles in this file or next to it", "Nothing to Do", "dim", False
+        label_ = self.track_label(it, tr)
         if it.sel in it.doc_errors:
-            return f"{label}: couldn't read this track", "Failed", "failed", True
+            return f"{label_}: couldn't read this track", "Failed", "failed", True
         if st == "skipped":
-            return f"{label}: {it.message}", "Skipped", "dim", True
+            return f"{label_}: {it.message}", "Skipped", "dim", True
         res = it.result
         if res is None:
-            return label, "", "", True
-        tidy = self._tidy_note(it)
+            return label_, "", "", True
         if not it.force and not tr.external and not batch.is_sdh(it, tr):
-            if tidy:
-                return f"{label}: regular subtitles. {tidy}", "Ready", "ready", True
-            return f"{label}: regular subtitles, nothing to strip", "No SDH", "dim", True
+            if has_tidy:
+                return f"{label_}: regular subtitles" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
+            return f"{label_}: regular subtitles, nothing to strip", "No SDH", "dim", True
         n = final_changed(res)
         if n == 0 and not tr.external:
-            if tidy:
-                return f"{label}: nothing to remove. {tidy}", "Ready", "ready", True
-            return f"{label}: nothing to remove", "Already clean", "dim", True
+            if has_tidy:
+                return f"{label_}: nothing to remove" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
+            return f"{label_}: nothing to remove", "Already Clean", "dim", True
         if it.locked:
             who = sorted({w for names in it.locked.values() for w in names})
-            return (f"{label}: open in {' and '.join(who)}, pause it there before saving",
-                    "In use", "check", True)
-        bits = [label]
+            return (f"{label_}: open in {' and '.join(who)}, pause it there before saving",
+                    "In Use", "check", True)
+        bits = [label_]
         if tr.external and self.video_mode != "sidecar":
             bits.append("goes into the video" + (" and the .srt is removed" if self.recycle_sub
                                                   and self.video_mode == "replace" and not self.keep_sdh else ""))
         if it.opts is not None:
             bits.append("custom edits")
-        tidy = self._tidy_note(it)
         if tidy:
-            bits.append(tidy[:1].lower() + tidy[1:])
+            bits.append(tidy)
         if res.notes.ocr_suspect:
             bits.append("converted from a disc image")
         unresolved = len(res.unresolved())
@@ -2139,15 +1354,18 @@ class MainWindow(QMainWindow):
         if unresolved == 0:
             return detail, "Ready", "ready", True
         if res.confidence == "low":
-            return detail, "Look closer", "low", True
-        return detail, f"{unresolved} to check", "check", True
+            return detail, "Look Closer", "low", True
+        return detail, f"{unresolved} to Check", "check", True
 
     def row_count(self, it: Item) -> str:
         """The number column in the file list: how many lines change."""
         if it.state == "done":
             return f"{it.cleaned:,} cleaned" if it.cleaned else ""
-        if it.result is None or it.state not in ("ready", "failed", "skipped") or it.track() is None:
+        tr = it.track()
+        if it.result is None or it.state not in ("ready", "failed", "skipped") or tr is None:
             return ""
+        if not it.force and not tr.external and not batch.is_sdh(it, tr):
+            return ""                                 # regular subtitles are skipped when saving: nothing is cleaned
         n = final_changed(it.result)
         return f"{n:,} to clean" if n else ""
 
@@ -2158,8 +1376,8 @@ class MainWindow(QMainWindow):
         if tr.external:
             name = os.path.basename(tr.external)
             stem = Path(it.path).stem
-            return f"{tr.lang_label}, from the {name[len(stem):]} file" if name.lower().startswith(stem.lower()) \
-                else f"{tr.lang_label}, from “{name}”"
+            return f"{tr.lang_label} from the {name[len(stem):]} file" if name.lower().startswith(stem.lower()) \
+                else f"{tr.lang_label} from “{name}”"
         return tr.title or tr.lang_label
 
     def _update_row(self, it: Item):
@@ -2183,12 +1401,17 @@ class MainWindow(QMainWindow):
             tip += "\n\n" + it.message
         if it.output and it.output != it.path:
             tip += f"\nSaved as {it.output}"
-        row.setToolTip(tip)
+        set_tip(row, tip)
         if it.uid == self.review_uid and self.page() == self.PAGE_REVIEW:
             self._update_review_head()
 
     def _update_summary(self):
+        """Schedule one summary update for everything that changed in this go."""
+        self._summary_timer.start()
+
+    def _do_update_summary(self):
         QTimer.singleShot(0, self._fit_files)
+        self._sync_tabs()
         if not self.items:
             self.summary.setText("")
             self.add_note_label.hide()
@@ -2203,16 +1426,16 @@ class MainWindow(QMainWindow):
             if it.state in ("queued", "probing", "reading"):
                 key = "reading"
             elif kind == "dim":
-                key = "nothing to do"
+                key = "with nothing to do"
             if key:
                 counts[key] = counts.get(key, 0) + 1
-        order = ["ready", "to check", "in use", "reading", "saving", "saved", "nothing to do", "failed"]
+        order = ["ready", "to check", "in use", "reading", "saving", "with nothing to do", "saved", "failed"]
         parts = [f"{counts[k]} {k}" for k in order if k in counts]
-        text = (", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1] + ".") if parts else ""
+        text = ", ".join(parts)
         if any(it.kind == "video" and it.name_state == "nokey" and it.pending for it in self.items):
-            text += "  Add a TMDB key in Settings to rename videos."
+            text += (". " if text else "") + "Add a TMDB key in Settings to rename videos."
         self.summary.setText(text.strip())
-        note = getattr(self, "add_note", "")
+        note = self.add_note
         self.add_note_label.setText(note[:1].upper() + note[1:])
         self.add_note_label.setVisible(bool(note))
         how = {"replace": "Saving replaces each original, which goes to the Recycle Bin once the new file checks out. "
@@ -2242,7 +1465,7 @@ class MainWindow(QMainWindow):
                 self.progress.setRange(0, 0)
         elif loading:
             self.progress.hide()
-            self.set_status("FFmpeg is needed to read the videos — click “FFmpeg needed” at the top.", "bad")
+            self.set_status("FFmpeg is needed to read the videos: click “FFmpeg Needed” at the top.", "bad")
         else:
             self.progress.hide()
             if not self.status.property("tone"):
@@ -2297,7 +1520,7 @@ class MainWindow(QMainWindow):
             who = sorted({w for i in locked for names in i.locked.values() for w in names})
             self.lock_banner.label.setText(
                 f"{plural(len(locked), 'file')} {'is' if len(locked) == 1 else 'are'} open in {' and '.join(who)}. "
-                "If you're seeding, pause those torrents before saving — SubScrub can't rewrite a file another "
+                "If you're seeding, pause those torrents before saving: SubScrub can't rewrite a file another "
                 "program has open. This updates when you come back to this window.")
         self.lock_banner.setVisible(bool(locked))
         self.lock_gap.setVisible(bool(locked))
@@ -2305,9 +1528,11 @@ class MainWindow(QMainWindow):
 
     def changeEvent(self, e):
         super().changeEvent(e)
-        from PySide6.QtCore import QEvent
-        if e.type() == QEvent.ActivationChange and self.isActiveWindow() and self.items and not self.busy():
-            self._lock_timer.start()
+        if e.type() == QEvent.ActivationChange:
+            if not self.isActiveWindow():
+                hide_tip()
+            elif self.items and not self.busy():
+                self._lock_timer.start()
 
     # ------------------------------------------------------------------ pages
     def show_files(self):
@@ -2315,6 +1540,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         for it in self.items:
             self._update_row(it)
+        self._sync_tabs()
         self._update_summary()
         self._update_buttons()
 
@@ -2345,7 +1571,8 @@ class MainWindow(QMainWindow):
         first = self.review_uid != uid or self.page() != self.PAGE_REVIEW
         self.review_uid = uid
         self.stack.setCurrentIndex(self.PAGE_REVIEW)
-        self.setWindowTitle(f"{it.name} — {APP_NAME}")
+        self._sync_tabs()
+        self.setWindowTitle(f"{it.name} – {APP_NAME}")
         it.reviewed = True
         self._clear_tracks()
         info = it.info
@@ -2366,11 +1593,10 @@ class MainWindow(QMainWindow):
                 bits.append(fmt_size(info.size))
             self.file_meta.setText(", ".join(bits))
             alltr = it.tracks()
-            self.track_count.setText(str(len(alltr)) if alltr else "")
+            self.track_count.setText(plural(len(alltr), "track") if alltr else "")
             plain = batch.plain_partner(it)
             for tr in alltr:
                 c = TrackCard(tr)
-                c.set_colors(self.t["accent"], self.t["radio_off"])
                 c.clicked.connect(self.select_track)
                 if tr.text_based and it.state == "reading":
                     c.set_stat("Reading…")
@@ -2381,7 +1607,7 @@ class MainWindow(QMainWindow):
                     if tr.index in it.doc_errors:
                         c.set_stat("Couldn't read", "warn")
                     elif sdh:
-                        c.set_stat(f"{plural(n, 'sound/name note')}", "accent" if tr.index == it.sel else "")
+                        c.set_stat(f"{plural(n, 'sound or name note')}", "accent" if tr.index == it.sel else "")
                     elif tr.index == plain:
                         c.set_stat("Regular, used as a cross-check", "dim")
                     else:
@@ -2411,38 +1637,53 @@ class MainWindow(QMainWindow):
             self._preview_key = None
         self.render_review()
         self._update_buttons()
+        QTimer.singleShot(0, self._fit_side)
 
     def _note(self, text):
         self.tracks_note.setText(text)
         self.tracks_note.show()
 
+    def _fit_side(self):
+        """The sidebar card is as tall as what's in it (it scrolls once that doesn't fit)."""
+        lay = self.side_inner.layout()
+        lay.activate()
+        h = lay.sizeHint().height() + 2
+        avail = self.stack.height() - 28
+        self.left.setFixedHeight(max(160, min(h, avail)))
+
     def _update_review_head(self):
         it = self.cur
         if it is None:
             return
-        fm = self.review_title.fontMetrics()
-        self.review_title.setText(fm.elidedText(it.name, Qt.ElideMiddle, max(100, self.review_title.width())))
-        self.review_title.setToolTip(it.path)
+        self.review_title.setText(it.name)
+        self.review_title.set_tip(it.path)
         detail, chip, kind, _ = self.verdict(it)
         count = self.row_count(it)
-        self.review_detail.setText(
-            detail.rstrip(".") + (f", {count.replace('to clean', 'lines to clean')}" if count else ""))
-        self.review_status.set(chip, kind, self.t)
+        text = detail.rstrip(".") + (f", {count.replace('to clean', 'lines to clean')}" if count else "")
+        notes = list(it.result.notes.notes) if it.result else []
+        if notes:
+            text += ". " + " ".join(notes)
+        self.review_detail.setText(text)
+        self.review_status.set(chip, kind)
         multi = len(self.items) > 1
         self.prev_file.setVisible(multi)
         self.next_file.setVisible(multi)
         tr = it.track()
-        self.nosdh_banner.setVisible(bool(tr) and it.loaded and not it.force and not tr.external
-                                     and not batch.is_sdh(it, tr))
-        line, _tone = self.name_line(it)
+        nosdh = bool(tr) and it.loaded and not it.force and not tr.external and not batch.is_sdh(it, tr)
+        self.nosdh_wrap.setVisible(nosdh)
+        if nosdh:
+            self.nosdh_banner.label.setText(
+                "This file only has regular subtitles, with no sound descriptions or speaker names to strip. " +
+                ("Saving only renames it and tidies its tracks; the subtitles stay as they are." if self._has_tidy(it)
+                 else "It's skipped when saving."))
+        line, tone = self.name_line(it)
         can = it.kind == "video" and self._renaming() and bool(self.tmdb_key) and it.name_state == "done" \
             and it.pending and it.match is not None and bool(it.match.choices or it.match.parsed.title)
-        self.name_btn.setVisible(can)
+        self.name_row.setVisible(can)
         if can:
-            self.name_btn.setText((line or "Name is already right") + "  ·  Change…")
-        notes = list(it.result.notes.notes) if it.result else []
-        self.review_notes.setText(" ".join(notes))
-        self.review_notes.setVisible(bool(notes))
+            self.name_label.setText(line or "The name is already right")
+            themed_icon(self.name_icon, "alert" if tone == "alert" else "arrow-right",
+                        "warn" if tone == "alert" else "text2", 15)
 
     def select_track(self, index: int):
         it = self.cur
@@ -2550,6 +1791,11 @@ class MainWindow(QMainWindow):
         it.result.overrides = it.overrides
         self._update_row(it)
         self._update_summary()
+        # the quick path: only that row, its timeline mark and the counts change
+        if self.preview_stack.currentIndex() == 1 and self.preview.update_cue(it.result, cue):
+            self._update_legend(it)
+            self._update_nav()
+            return
         self.render_review(keep_cue=cue)
 
     def toggle_current_line(self):
@@ -2566,6 +1812,23 @@ class MainWindow(QMainWindow):
             self.settings.setValue("preview_filter", key)
         self._preview_key = None
         self.render_review()
+
+    def _update_legend(self, it: Item) -> int:
+        """The counts next to the filter. Returns how many lines are judgement calls (flagged)."""
+        res = it.result
+        st = res.stats
+        unresolved = len(res.unresolved())
+        kept_by_user = sum(1 for v in it.overrides.values() if v == "orig")
+        items = []
+        if unresolved:
+            items.append(("btn", f"{unresolved:,} to check", True))
+        items += [("removed", f"{st.removed:,} removed", False), ("trim", f"{st.edited:,} trimmed", False)]
+        untouched = f"{st.total - st.changed:,} untouched"
+        if kept_by_user:
+            untouched += f", {kept_by_user} kept by you"
+        items.append(("mute_line", untouched, False))
+        self.legend.set_items(items)
+        return len(res.flagged())
 
     def render_review(self, keep_cue: int | None = None):
         if not hasattr(self, "preview"):
@@ -2589,6 +1852,7 @@ class MainWindow(QMainWindow):
         self.rule_rows["ocr_fixes"].setVisible(bool(res and res.notes.ocr_suspect))
         self.rule_rows["quote_italics"].setVisible(bool(res and res.notes.quote_voices))
         self.rule_rows["mixed_case_labels"].setVisible(not (res and res.notes.mixed_names))
+        QTimer.singleShot(0, self._fit_side)
 
         if it.info is None or it.state in ("queued", "probing", "reading"):
             self._empty("Couldn't read this file." if it.state == "failed" else "Reading subtitles…")
@@ -2604,20 +1868,8 @@ class MainWindow(QMainWindow):
             self._empty("Reading subtitles…")
             return
         st = res.stats
-        unresolved = len(res.unresolved())
-        flagged = len(res.flagged())
-        kept_by_user = sum(1 for v in it.overrides.values() if v == "orig")
-        t = self.t
-        items = []
-        if unresolved:
-            items.append((t["accent"], f"{unresolved:,} to check", True))
-        items += [(t["removed"], f"{st.removed:,} removed", False), (t["trim"], f"{st.edited:,} trimmed", False)]
-        untouched = f"{st.total - st.changed:,} untouched"
-        if kept_by_user:
-            untouched += f", {kept_by_user} kept by you"
-        items.append((t["faint"], untouched, False))
-        self.legend.set_items(items)
-        self.filter.buttons["check"].setVisible(flagged > 0)
+        flagged = self._update_legend(it)
+        self.filter.set_option_visible("check", flagged > 0)
         show = self.filter.value()
         if show == "check" and not flagged:
             show = "changes"
@@ -2642,11 +1894,11 @@ class MainWindow(QMainWindow):
 
     def _update_nav(self):
         k, n = self.preview.nav_state()
-        self.nav_count.setText(f"{k} of {n}" if k else f"{n} changes")
+        self.nav_count.setText(f"{k:,} of {n:,}" if k else f"{n:,} changes")
         row = self.preview.current_row()
         ok = row is not None and row.status != "kept"
         self.undo_btn.setEnabled(ok)
-        self.undo_btn.setText(" Use cleaned" if ok and row.override == "orig" else " Keep original")
+        self.undo_btn.setText(" Use Cleaned" if ok and row.override == "orig" else " Keep Original")
 
     def _empty(self, text):
         self.preview_empty.setText(text)
@@ -2661,11 +1913,11 @@ class MainWindow(QMainWindow):
         n = len(pending)
         if len(self.items) <= 1:
             it = self.items[0] if self.items else None
-            text = "Saved" if it and it.state == "done" else "Clean and save"
+            text = "Saved" if it and it.state == "done" else "Clean and Save"
         else:
-            text = f"Clean and save {n} files" if n > 1 else ("Clean and save" if n else "All done")
+            text = f"Clean and Save {n} Files" if n > 1 else "Clean and Save"
         self.save_btn.setText(text)
-        self.save_btn.setVisible(n > 0 or not self.items)        # nothing left to save: no greyed-out "All done"
+        self.save_btn.setVisible(n > 0 and not busy)        # nothing left to save: no greyed-out "All done"
         needs_ffmpeg = any(i.kind == "video" or self.sub_mode == "embed" for i in pending)
         self.save_btn.setEnabled(n > 0 and not busy and (self.tools.ready or not needs_ffmpeg))
         it = self.cur
@@ -2673,6 +1925,8 @@ class MainWindow(QMainWindow):
                and not busy)
         self.save_one_btn.setVisible(one)
         self.left.setEnabled(not busy)
+        self._sync_tabs()
+        self.footer.update()
 
     def start_save(self, only: int | None = None):
         if self.busy() or not self.save_btn.isEnabled() and only is None:
@@ -2702,8 +1956,8 @@ class MainWindow(QMainWindow):
                 break
         if self._renaming() and self.tmdb_key and any(
                 i.kind == "video" and i.name_state in ("", "looking") for i in scope):
-            QMessageBox.information(self, "Still looking up titles",
-                                    "SubScrub is still finding the titles for the new names. Try again in a moment.")
+            tell(self, "Still looking up titles",
+                 "SubScrub is still finding the titles for the new names. Try again in a moment.")
             return
         loaded = [i for i in scope if i.state == "ready" and i.result is not None]
         unseen = [i for i in scope if i.state in ("queued", "probing", "reading")]
@@ -2715,21 +1969,18 @@ class MainWindow(QMainWindow):
         if single and loaded:
             it = loaded[0]
             if not sdh_ok(it) and not self._has_tidy(it):
-                box = QMessageBox(QMessageBox.Question, "No SDH subtitles",
-                                  f"“{it.name}” only has regular subtitles — there are no sound descriptions or "
-                                  "speaker names to strip.\n\nClean it anyway (dialogue dashes and lyric styling only)?",
-                                  QMessageBox.NoButton, self)
-                go = box.addButton("Clean anyway", QMessageBox.AcceptRole)
-                box.addButton(QMessageBox.Cancel)
-                box.exec()
-                if box.clickedButton() is not go:
+                choice, _ = ask(self, "Clean it anyway?",
+                                f"“{it.name}” only has regular subtitles: there are no sound descriptions or speaker "
+                                "names to strip.",
+                                [("cancel", "Cancel", ""), ("go", "Clean Anyway", "primary")],
+                                "Cleaning it anyway removes dialogue dashes and restyles song lyrics only.")
+                if choice != "go":
                     return
                 it.force = True
                 self._compute_result(it)
                 flagged = [it] if it.result and it.result.unresolved() else []
             elif sdh_ok(it) and final_changed(it.result) == 0 and not it.track().external and not self._has_tidy(it):
-                QMessageBox.information(self, "Nothing to remove",
-                                        "This track has nothing to clean with the current edits.")
+                tell(self, "Nothing to remove", "This track has nothing to clean with the current edits.")
                 return
 
         policy = "hold_new"                       # files read during the save hold if they turn out uncertain
@@ -2754,23 +2005,20 @@ class MainWindow(QMainWindow):
 
         unsure = [i for i in jobs_items if self._renaming() and batch.name_unsure(i)]
         if unsure:
-            box = QMessageBox(QMessageBox.Question, "Not sure of some titles",
-                              f"SubScrub couldn't tell which title {plural(len(unsure), 'file')} "
-                              f"{'is' if len(unsure) == 1 else 'are'}:\n\n" +
-                              "\n".join(f"•  {i.name}" for i in unsure[:6]) + ("\n•  …" if len(unsure) > 6 else ""),
-                              QMessageBox.NoButton, self)
-            pick = box.addButton("Choose titles…", QMessageBox.AcceptRole)
-            keep = box.addButton("Keep their names", QMessageBox.DestructiveRole)
-            box.addButton(QMessageBox.Cancel)
-            box.exec()
-            if box.clickedButton() is pick:
+            choice, _ = ask(self, "Not sure of some titles",
+                            f"SubScrub couldn't tell which title {plural(len(unsure), 'file')} "
+                            f"{'is' if len(unsure) == 1 else 'are'}:",
+                            [("cancel", "Cancel", ""), ("keep", "Keep Their Names", ""),
+                             ("pick", "Choose Titles…", "primary")],
+                            rows=[(i.name, "") for i in unsure[:6]], more=max(0, len(unsure) - 6))
+            if choice == "pick":
                 for i in unsure:
                     dlg = NameDialog(self, i, self._api(), self.name_year)
                     if dlg.exec() != QDialog.Accepted or dlg.pick is None:
                         return
                     i.name_pick = dlg.pick
                     self._update_row(i)
-            elif box.clickedButton() is keep:
+            elif choice == "keep":
                 for i in unsure:
                     i.name_pick = "keep"
                     self._update_row(i)
@@ -2783,21 +2031,18 @@ class MainWindow(QMainWindow):
         if rewrites and self.confirm_replace:
             n = len(rewrites)
             what = f"“{rewrites[0].name}”" if n == 1 else f"{n} files"
-            box = QMessageBox(QMessageBox.Question, "Rewrite in place?",
-                              f"SubScrub will rewrite {what} with the cleaned subtitles"
-                              f"{' as the default track' if self.make_default else ''}"
-                              f"{self._rewrite_extras(renames, jobs_items)}. "
-                              "Each new file is checked before the old one goes to the Recycle Bin.\n\n"
-                              "Tip: very large files may be too big for the Recycle Bin, in which case Windows "
-                              "deletes them instead.", QMessageBox.NoButton, self)
-            go = box.addButton("Rewrite" if n == 1 else f"Rewrite {n} files", QMessageBox.AcceptRole)
-            box.addButton(QMessageBox.Cancel)
-            cb = QCheckBox("Don't ask again")
-            box.setCheckBox(cb)
-            box.exec()
-            if box.clickedButton() is not go:
+            choice, dont_ask = ask(
+                self, "Rewrite in place?" if n == 1 else f"Rewrite {n} files in place?",
+                f"SubScrub will rewrite {what} with the cleaned subtitles"
+                f"{' as the default track' if self.make_default else ''}"
+                f"{self._rewrite_extras(renames, jobs_items)}. "
+                "Each new file is checked before the old one goes to the Recycle Bin.",
+                [("cancel", "Cancel", ""), ("go", "Rewrite" if n == 1 else f"Rewrite {n} Files", "primary")],
+                "Very large files may be too big for the Recycle Bin, in which case Windows deletes them instead.",
+                checkbox="Don't ask again")
+            if choice != "go":
                 return
-            if cb.isChecked():
+            if dont_ask:
                 self.confirm_replace = False
                 self._save_prefs()
         overwrite = True
@@ -2810,14 +2055,13 @@ class MainWindow(QMainWindow):
                     if p.exists():
                         clashes.append(p.name)
             if clashes:
-                ans = QMessageBox.question(self, "Overwrite subtitle files?",
-                                           "These already exist:\n\n" + "\n".join(clashes[:8]) +
-                                           ("\n…" if len(clashes) > 8 else "") + "\n\nOverwrite them? "
-                                           "(No saves under new names instead.)",
-                                           QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
-                if ans == QMessageBox.Cancel:
+                choice, _ = ask(self, "Overwrite subtitle files?", "These already exist:",
+                                [("cancel", "Cancel", ""), ("no", "Keep Both", ""), ("yes", "Overwrite", "primary")],
+                                "Keep Both saves the new ones under new names.",
+                                rows=[(c, "") for c in clashes[:8]], more=max(0, len(clashes) - 8))
+                if choice not in ("yes", "no"):
                     return
-                overwrite = ans == QMessageBox.Yes
+                overwrite = choice == "yes"
 
         # hand everything to one worker; stop background loading so they don't fight over the disk
         if self.loader is not None and self.loader.isRunning():
@@ -2867,7 +2111,7 @@ class MainWindow(QMainWindow):
             self.set_status("Stopping…")
 
     def _set_busy(self, on: bool):
-        self.save_btn.setVisible(not on)
+        self._saving = on
         self.cancel_btn.setVisible(on)
         self.progress.setVisible(on)
         if on:
@@ -2889,12 +2133,12 @@ class MainWindow(QMainWindow):
                 self.files_scroll.ensureWidgetVisible(row)
         self._b_overall(0.0, it.name if it else "")
 
-    def _b_overall(self, frac: float, label: str):
+    def _b_overall(self, frac: float, text: str):
         n = max(1, self.batch_total)
         self.progress.setRange(0, 1000)
         self.progress.setValue(int((self.batch_pos + max(0.0, min(1.0, frac))) / n * 1000))
         prefix = f"{self.batch_pos + 1} of {self.batch_total}:  " if self.batch_total > 1 else ""
-        self.set_status(prefix + label)
+        self.set_status(prefix + text)
 
     def _b_loaded(self, uid, payload: dict):
         it = self.item(uid)
@@ -3003,23 +2247,21 @@ class MainWindow(QMainWindow):
             parts.append(f"{c['failed']} failed")
         summary = ", ".join(parts) or "nothing saved"
         if cancelled:
-            self.set_status(f"Stopped — {summary}.", "bad" if c["failed"] else "")
+            self.set_status(f"Stopped: {summary}.", "bad" if c["failed"] else "")
         elif c["failed"]:
-            self.set_status(f"Finished with problems — {summary}. Hover a file to see why.", "bad")
+            self.set_status(f"Finished with problems: {summary}. Hover a file to see why.", "bad")
         else:
             single = self.batch_total == 1 and c["done"] == 1
             it = next((i for i in self.items if i.state == "done" and i.output == self.last_output), None) \
                 if single else None
-            self.set_status(f"Saved “{os.path.basename(it.output)}”. {it.message}" if it
-                            else f"Done — {summary}.", "good" if c["done"] else "")
+            self.set_status(f"Saved “{os.path.basename(it.output)}”. {it.message}".strip() if it
+                            else f"Done: {summary}.", "good" if c["done"] else "")
         if self.last_output:
             self.open_btn.show()
         if c["failed"] and self.batch_total == 1:
             it = next((i for i in self.items if i.state == "failed"), None)
             if it:
-                box = QMessageBox(QMessageBox.Warning, "Couldn't save", it.message[:1200], QMessageBox.Ok, self)
-                box.addButton("Show log", QMessageBox.HelpRole).clicked.connect(self.show_log)
-                box.exec()
+                tell(self, "Couldn't save", it.message[:1200], extra=("Show Log", self.show_log))
         for it in self.items:
             self._update_row(it)
         self._update_summary()
@@ -3031,15 +2273,15 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self.veil.isVisible():
-            self.veil.setGeometry(self.root.rect().adjusted(12, 12, -12, -12))
+            self.veil.setGeometry(self.root.rect())
         if self.page() == self.PAGE_REVIEW:
-            self._update_review_head()
+            QTimer.singleShot(0, self._fit_side)
 
     def closeEvent(self, e):
         if self.busy():
-            if QMessageBox.question(self, "Still saving",
-                                    "Files are still being written. Stop and discard the one in progress?") \
-                    != QMessageBox.Yes:
+            choice, _ = ask(self, "Still saving", "Files are still being written. Stop and discard the one in "
+                            "progress?", [("cancel", "Keep Saving", ""), ("stop", "Stop and Close", "danger")])
+            if choice != "stop":
                 e.ignore()
                 return
             self.batch_worker.cancel.set()
