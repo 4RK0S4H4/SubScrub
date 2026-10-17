@@ -220,7 +220,7 @@ LANGS = {  # ISO 639-2 -> (name, ISO 639-1)
     "eng": ("English", "en"), "spa": ("Spanish", "es"), "fre": ("French", "fr"), "fra": ("French", "fr"),
     "ger": ("German", "de"), "deu": ("German", "de"), "ita": ("Italian", "it"), "por": ("Portuguese", "pt"),
     "jpn": ("Japanese", "ja"), "kor": ("Korean", "ko"), "chi": ("Chinese", "zh"), "zho": ("Chinese", "zh"),
-    "rus": ("Russian", "ru"), "ara": ("Arabic", "ar"), "hin": ("Hindi", "hin"), "dut": ("Dutch", "nl"),
+    "rus": ("Russian", "ru"), "ara": ("Arabic", "ar"), "hin": ("Hindi", "hi"), "dut": ("Dutch", "nl"),
     "nld": ("Dutch", "nl"), "swe": ("Swedish", "sv"), "nor": ("Norwegian", "no"), "nob": ("Norwegian", "nb"),
     "dan": ("Danish", "da"), "fin": ("Finnish", "fi"), "pol": ("Polish", "pl"), "tur": ("Turkish", "tr"),
     "gre": ("Greek", "el"), "ell": ("Greek", "el"), "heb": ("Hebrew", "he"), "tha": ("Thai", "th"),
@@ -318,7 +318,7 @@ IMAGE_SUB_EXTS = {".sup", ".sub", ".idx"}
 SDH_TOKENS = {"sdh", "hi", "cc", "hoh"}
 _SHORT_TO_3 = {}
 for _code, (_n, _short) in LANGS.items():
-    if _short and len(_short) == 2 and _code != "und":
+    if _short and len(_short) == 2 and _code != "und" and _short not in SDH_TOKENS:     # ".hi." means hearing-impaired
         _SHORT_TO_3.setdefault(_short, _code)
 
 
@@ -454,6 +454,104 @@ def recycle(path: str | Path, log: Log | None = None) -> str:
             log(f"Recycle Bin unavailable for {path.name}: {e}")
         os.remove(path)
         return "deleted (Recycle Bin unavailable)"
+
+
+# ============================================================================ leftovers of an interrupted save
+
+TMP_MARK = ".subscrub-tmp"
+STALE_TEMP_PREFIXES = ("subscrub_mux_", "subscrub_verify_", "subscrub_")
+
+
+@dataclass
+class Leftover:
+    path: str                 # the half-written "Name.subscrub-tmp.mkv"
+    original: str | None      # the video it was made from, if that is still there
+    size: int = 0
+
+    @property
+    def name(self) -> str:
+        return os.path.basename(self.path)
+
+
+def _leftover(path: str) -> Leftover | None:
+    p = Path(path)
+    stem, mark, _ = p.name.partition(TMP_MARK)
+    if not mark or p.suffix.lower() not in VIDEO_EXTS or not stem:
+        return None
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return None
+    orig = next((str(p.with_name(stem + e)) for e in sorted({p.suffix, *VIDEO_EXTS})
+                 if (p.with_name(stem + e)).is_file()), None)
+    return Leftover(str(p), orig, size)
+
+
+def find_leftovers(paths: list[str], limit: int = 2000) -> list[Leftover]:
+    """Unfinished "Name.subscrub-tmp.ext" files in the folders given, or next to the files given."""
+    seen: dict[str, Leftover] = {}
+
+    def look(folder: str, only_stems: set | None = None):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return
+        for n in names:
+            if TMP_MARK in n and (only_stems is None or n.partition(TMP_MARK)[0].lower() in only_stems):
+                lo = _leftover(os.path.join(folder, n))
+                if lo is not None:
+                    seen[os.path.normcase(os.path.abspath(lo.path))] = lo
+
+    for p in paths:
+        if os.path.isdir(p):
+            count = 0
+            for root, dirs, _files in os.walk(p):
+                dirs.sort()
+                look(root)
+                count += 1
+                if count >= limit:
+                    break
+        elif os.path.isfile(p):
+            if TMP_MARK in os.path.basename(p):
+                lo = _leftover(p)
+                if lo is not None:
+                    seen[os.path.normcase(os.path.abspath(lo.path))] = lo
+            else:
+                look(os.path.dirname(os.path.abspath(p)), {Path(p).stem.lower()})
+    return sorted(seen.values(), key=lambda x: x.path.lower())
+
+
+def restore_leftover(lo: Leftover) -> str:
+    """The original is gone, so the half-written copy may be all that is left: give it its real name back.
+    Never overwrites anything."""
+    p = Path(lo.path)
+    target = p.with_name(p.name.partition(TMP_MARK)[0] + p.suffix)
+    if target.exists():
+        raise ToolError(f"“{target.name}” already exists, so “{p.name}” was left as it is.")
+    os.rename(p, target)
+    return str(target)
+
+
+def remove_stale_temp_dirs(max_age: float = 86400.0, root: str | None = None) -> int:
+    """Delete SubScrub's own working folders in %TEMP% that a crash left behind (older than a day, so a second
+    running copy is never touched)."""
+    root = root or tempfile.gettempdir()
+    removed = 0
+    cutoff = time.time() - max_age
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for n in names:
+        full = os.path.join(root, n)
+        if n.startswith(STALE_TEMP_PREFIXES) and os.path.isdir(full) and not os.path.islink(full):
+            try:
+                if os.path.getmtime(full) < cutoff:
+                    shutil.rmtree(full, ignore_errors=True)
+                    removed += 0 if os.path.exists(full) else 1
+            except OSError:
+                continue
+    return removed
 
 
 def probe(tools: Tools, path: str, log: Log | None = None) -> MediaInfo:
@@ -715,6 +813,8 @@ def output_path(info: MediaInfo, opts: SaveOptions, fmt: str) -> Path:
         return unique_path(src.with_name(f"{clean.stem}.dialogue.{fmt}"))
     if opts.mode == "sidecar":
         short = lang_short(opts.language)
+        if short in SDH_TOKENS:
+            short = (opts.language or "").lower()[:3]      # Hindi: "Movie.hin.srt", as ".hi." would read as SDH
         name = f"{src.stem}.{short}.{fmt}" if short else f"{src.stem}.dialogue.{fmt}"
         return src.with_name(name)
     ext = src.suffix if info.kind != "other" else ".mkv"

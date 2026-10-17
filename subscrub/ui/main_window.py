@@ -1037,9 +1037,43 @@ class MainWindow(QMainWindow):
         if d:
             self.add_paths([d])
 
+    def _offer_leftovers(self, leftovers: list):
+        """Unfinished copies from a save that was interrupted. Nothing is removed without asking."""
+        have = [lo for lo in leftovers if lo.original]
+        if have:
+            choice, _ = ask(self, "Unfinished Copies Found",
+                            "An earlier save was interrupted and left unfinished copies next to these videos. "
+                            "The videos themselves are fine. Move the leftovers to the Recycle Bin?",
+                            [("keep", "Keep Them", ""), ("remove", "Move to Recycle Bin", "primary")],
+                            rows=[(lo.name, fmt_size(lo.size)) for lo in have[:8]], more=max(0, len(have) - 8))
+            if choice == "remove":
+                from send2trash import send2trash
+                failed = []
+                for lo in have:
+                    try:
+                        send2trash(lo.path)
+                        self.log(f"Moved the unfinished copy {lo.path} to the Recycle Bin")
+                    except Exception as err:  # noqa: BLE001
+                        failed.append((lo.name, str(err)[:60]))
+                if failed:
+                    tell(self, "Couldn't Remove Everything", "These stay where they are:", rows=failed[:8])
+        for lo in (lo for lo in leftovers if not lo.original):
+            choice, _ = ask(self, "The Original Is Missing",
+                            f"“{lo.name}” is all that is left of this video: the original isn't in the folder. "
+                            "It may be incomplete, so nothing was removed.",
+                            [("leave", "Leave It", ""), ("restore", "Rename It Back", "primary")],
+                            "Renaming gives it the original name back. Check that it plays before relying on it.")
+            if choice == "restore":
+                try:
+                    new = media.restore_leftover(lo)
+                    self.log(f"Renamed {lo.path} back to {new}")
+                except (OSError, media.ToolError) as err:
+                    tell(self, "Couldn't Rename It", str(err))
+
     def add_paths(self, paths: list[str]):
         if self.busy():
             return
+        self._offer_leftovers(media.find_leftovers(paths))
         files, skipped = batch.expand_paths(paths)
         if skipped:
             tell(self, "Picture subtitles can't be cleaned",
@@ -2318,6 +2352,14 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._fit_side)
             QTimer.singleShot(0, self._fit_toolbar)
 
+    @staticmethod
+    def _wait_for(thread, seconds: float):
+        """Wait for a worker thread to finish while keeping the window alive (so "Stopping…" shows)."""
+        end = time.monotonic() + seconds
+        while thread.isRunning() and time.monotonic() < end:
+            QApplication.processEvents()
+            thread.wait(100)
+
     def closeEvent(self, e):
         if self.busy():
             choice, _ = ask(self, "Still saving", "Files are still being written. Stop and discard the one in "
@@ -2326,10 +2368,11 @@ class MainWindow(QMainWindow):
                 e.ignore()
                 return
             self.batch_worker.cancel.set()
-            self.batch_worker.wait(15000)
+            self.set_status("Stopping…")
+            self._wait_for(self.batch_worker, 300)      # until the tool is really gone, so no temp file is left
         if self.loader is not None and self.loader.isRunning():
             self.loader.cancel.set()
-            self.loader.wait(3000)
+            self._wait_for(self.loader, 30)
         for it in self.items:
             if it.tmpdir:
                 shutil.rmtree(it.tmpdir, ignore_errors=True)

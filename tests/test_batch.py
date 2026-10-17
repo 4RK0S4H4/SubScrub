@@ -163,6 +163,37 @@ def test_embedded_sdh_plus_redundant_srt():
     assert [os.path.basename(p) for p in batch.removable_sidecars(it, True, "replace")] == ["Movie.en.srt"]
 
 
+def test_stale_temp_folders_are_removed_only_when_old_and_ours():
+    root = tempfile.mkdtemp()
+    old, fresh, other = (os.path.join(root, n) for n in ("subscrub_mux_old", "subscrub_fresh", "someone_else"))
+    for p in (old, fresh, other):
+        os.makedirs(p)
+    long_ago = 1_000_000_000
+    for p in (old, other):
+        os.utime(p, (long_ago, long_ago))
+    assert media.remove_stale_temp_dirs(root=root) == 1
+    assert not os.path.exists(old) and os.path.exists(fresh) and os.path.exists(other)
+
+
+def test_leftover_detection():
+    d = tempfile.mkdtemp()
+    for n in ("Movie.mkv", "Movie.subscrub-tmp.mkv", "Gone.subscrub-tmp.mkv", "Other.mkv", "notes.subscrub-tmp.txt"):
+        open(os.path.join(d, n), "w", encoding="utf-8").write("x")
+    by = {lo.name: lo for lo in media.find_leftovers([d])}
+    assert set(by) == {"Movie.subscrub-tmp.mkv", "Gone.subscrub-tmp.mkv"}
+    assert by["Movie.subscrub-tmp.mkv"].original and by["Gone.subscrub-tmp.mkv"].original is None
+    # picking just the video finds its own leftover and nobody else's
+    assert [lo.name for lo in media.find_leftovers([os.path.join(d, "Movie.mkv")])] == ["Movie.subscrub-tmp.mkv"]
+    assert media.find_leftovers([os.path.join(d, "Other.mkv")]) == []
+    new = media.restore_leftover(by["Gone.subscrub-tmp.mkv"])
+    assert os.path.basename(new) == "Gone.mkv" and os.path.exists(new)
+    try:
+        media.restore_leftover(by["Movie.subscrub-tmp.mkv"])
+        raise AssertionError("must not overwrite the original")
+    except media.ToolError:
+        pass
+
+
 if __name__ == "__main__":
     import inspect, sys
     fns = [f for n, f in sorted(globals().items()) if n.startswith("test_") and inspect.isfunction(f)]
