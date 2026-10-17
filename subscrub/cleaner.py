@@ -85,6 +85,11 @@ RULE_NAMES = {
 
 PH_BASE = 0xE000                      # private-use chars stand in for formatting tags
 PH = "[-]"
+# A dialogue dash is a hyphen, a Unicode dash or minus, or "--" followed by a space ("--Wait" is a stutter).
+DASHC = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+DSH = rf"(?:--(?=[ \t])|[{DASHC}](?![{DASHC}]))"
+DSH_OPT = rf"(?:{DSH}\s*)?"
+STARTS_DASH = re.compile(rf"\s*{DSH}")
 TAG_RE_TEXT = re.compile(r"<[^<>\n]*>|\{\\[^{}\n]*\}")   # SRT / VTT (+ {\an8} in SRT)
 TAG_RE_ASS = re.compile(r"\{[^{}]*\}")                   # every {...} block in ASS is invisible
 ASS_DRAWING = re.compile(r"\{[^{}]*\\p[1-9]")
@@ -94,23 +99,23 @@ PARENS = re.compile(r"[(（][^()（）]*[)）]")
 MUSIC = "♪♫♬♩🎵🎶"
 MUSIC_RUN = f"[{MUSIC}]+"
 MUSIC_SEG = re.compile(f"{MUSIC_RUN}([^{MUSIC}]*?){MUSIC_RUN}")
-HASH_LYRIC = re.compile(rf"^({PH}*\s*(?:-\s*)?{PH}*)#\s+(.*?)\s*#({PH}*)\s*$")
+HASH_LYRIC = re.compile(rf"^({PH}*\s*{DSH_OPT}{PH}*)#\s+(.*?)\s*#({PH}*)\s*$")
 
 U = "A-ZÀ-ÖØ-ÞЀ-ЯΑ-Ω"                # upper-case letters
 L = "a-zß-öø-ÿа-яα-ω"                 # lower-case letters
 _LWORD = rf"[\"“]?(?:Mc|Mac)?[{U}0-9#][{U}0-9.'’\"“”\-#/]*"
 LABEL_BODY = rf"{_LWORD}(?:\s+(?:&|and|AND|{_LWORD})){{0,4}}"
 LABEL_UPPER = re.compile(
-    rf"^(?P<pre>{PH}*\s*(?:-\s*)?{PH}*)[\"“]?(?P<label>{LABEL_BODY})\s*(?P<sep>[:;])"
+    rf"^(?P<pre>{PH}*\s*{DSH_OPT}{PH}*)[\"“]?(?P<label>{LABEL_BODY})\s*(?P<sep>[:;])"
     rf"(?P<post>\s+|$|(?={PH})|(?=[{U}\"“'‘¿¡]))\s*"
 )
 LABEL_MIDLINE = re.compile(          # "Nice.HOLDEN: Shut up."  "something nice? -IAN: No."
-    rf"(?:(?<=[.!?…])|(?<=[.!?…][\"”])|(?<=[.!?…] )|(?<=[.!?…][\"”] ))[ \t]*-?[ \t]*(?P<label>{LABEL_BODY})[ \t]*:(?=\s|[{U}\"“'‘])[ \t]*"
+    rf"(?:(?<=[.!?…])|(?<=[.!?…][\"”])|(?<=[.!?…] )|(?<=[.!?…][\"”] ))[ \t]*(?:{DSH}[ \t]*)?(?P<label>{LABEL_BODY})[ \t]*:(?=\s|[{U}\"“'‘])[ \t]*"
 )
 MIXED_NAME = rf"[{U}][{L}'’]+(?:[ -](?:[{U}][{U}{L}'’]*|\d+|on|of|the|over)){{0,3}}"
-LABEL_MIXED = re.compile(rf"^(?P<pre>{PH}*\s*(?:-\s*)?{PH}*)(?P<label>{MIXED_NAME})\s*:\s+")
-MIXED_MIDLINE = re.compile(rf"(?<=[.!?…])[ \t]+-?[ \t]*(?P<label>{MIXED_NAME})[ \t]*:[ \t]+")
-MIXED_CANDIDATE = re.compile(rf"(?:^|(?<=[.!?…]\s)|(?<=-))\s*-?\s*({MIXED_NAME})\s*:\s+\S")
+LABEL_MIXED = re.compile(rf"^(?P<pre>{PH}*\s*{DSH_OPT}{PH}*)(?P<label>{MIXED_NAME})\s*:\s+")
+MIXED_MIDLINE = re.compile(rf"(?<=[.!?…])[ \t]+(?:{DSH}[ \t]*)?(?P<label>{MIXED_NAME})[ \t]*:[ \t]+")
+MIXED_CANDIDATE = re.compile(rf"(?:^|(?<=[.!?…]\s)|(?<=[{DASHC}]))\s*{DSH_OPT}({MIXED_NAME})\s*:\s+\S")
 LABEL_STOP = {"NO", "OK", "OKAY", "YES", "OH", "HEY", "PS", "P.S.", "NOTE", "AM", "PM", "A.M.", "P.M.", "Q", "A",
               "WARNING", "ATTENTION", "CAUTION", "ALERT", "BREAKING", "UPDATE", "RE", "FYI"}
 MIXED_STOP = {"warning", "note", "attention", "caution", "size", "speed", "homework", "answer", "question",
@@ -173,7 +178,16 @@ SOUND_LINE = re.compile(r"^[a-z][a-z'\-]*(?:[ ,]+[a-z][a-z'\-]*){0,7}!?$")
 CONTRACTION_START = re.compile(r"^(?:cause|cos|coz|em|til|till|tis|twas|round|bout|kay|course|fore|n|nuff|sup|cept|"
                                r"bout|scuse|member|ello|allo|ow|uns|ere|nother|ve|re|ll|d|s|m|t|n')\b", re.I)
 WORD = re.compile(r"\w")
-DASH_LINE = re.compile(rf"^({PH}*)\s*-(?!-)\s*")
+DASH_LINE = re.compile(rf"^({PH}*)\s*{DSH}\s*")
+
+
+def _starts_dash(vis: str) -> bool:
+    return bool(STARTS_DASH.match(vis))
+
+
+def _strip_dash(vis: str) -> str:
+    """The visible text of a line without its dialogue dash."""
+    return re.sub(rf"^\s*{DSH_OPT}", "", vis).strip()
 
 
 def _has_words(s: str) -> bool:
@@ -218,6 +232,30 @@ def _looks_like_annotation(content: str) -> bool:
     if len(words) <= 4 and not re.search(r"[.?!]", c) and not PRONOUNS.search(c):
         return True                                   # (Frank), (Car horn), (Thunder, birdsong)
     return bool(ANNOTATION_HINT.search(c)) and len(words) <= 6 and not PRONOUNS.search(c)
+
+
+NUMBER_WORDS = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|" \
+               "sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|" \
+               "thousand|million"
+SPEECH_HINT = re.compile(rf"\b(?:he|she|it|they|them|him|his|her|hers|its|their|we|us|our|you|your|I|me|my|mine|"
+                         rf"{NUMBER_WORDS})\b|\w['’](?:s|t|re|ve|ll|d|m)\b|\d", re.I)
+
+
+def _sounds_like_speech(content: str) -> bool:
+    """A pronoun, a contraction or a number: what dialogue is made of, and what a sound note rarely has."""
+    return bool(SPEECH_HINT.search(_visible(content)))
+
+
+def _inside_sentence(whole: str, start: int, end: int) -> bool:
+    """The span has words on both sides within the same sentence ("Mom (she's in the car) is fine."), so
+    removing it could take part of a spoken line with it."""
+    before = _visible(whole[:start]).split("\n")[-1].rstrip()
+    rest = _visible(whole[end:]).split("\n")
+    after = rest[0].lstrip()
+    if not after:                                     # the sentence carries on in the next line
+        nxt = next((r.lstrip() for r in rest[1:] if r.strip()), "")
+        after = nxt if nxt[:1].islower() else ""
+    return bool(WORD.search(before)) and before[-1] not in ".!?…" and bool(re.match(r"[\w\"“'‘]", after))
 
 
 def _label_ok(label: str) -> bool:
@@ -326,7 +364,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
     # --- OCR damage (only where the document showed the pattern)
     if opts.ocr_fixes:
         if ctx.ocr_notes == "j":
-            new = "\n".join(re.sub(r'\s*j\s?"\s*$', " ♪", re.sub(rf'^({PH}*\s*-?\s*{PH}*)j\s?"\s*', r"\1♪ ", l))
+            new = "\n".join(re.sub(r'\s*j\s?"\s*$', " ♪", re.sub(rf'^({PH}*\s*{DSH_OPT}{PH}*)j\s?"\s*', r"\1♪ ", l))
                             for l in work.split("\n"))
             new = re.sub(r"\(J'\s*", "(♪ ", new)
             if new != work:
@@ -334,9 +372,9 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
                 rec.hit("ocr", 1, "♪ had been misread as j\" by OCR")
         elif ctx.ocr_notes == "I":
             ls = work.split("\n")
-            if re.match(rf"^{PH}*\s*-?\s*{PH}*I\s", ls[0]) and re.search(rf"\sI{PH}*$", ls[-1]) and \
+            if re.match(rf"^{PH}*\s*{DSH_OPT}{PH}*I\s", ls[0]) and re.search(rf"\sI{PH}*$", ls[-1]) and \
                     not REAL_I_END.search(_visible(ls[-1])):
-                ls[0] = re.sub(rf"^({PH}*\s*-?\s*{PH}*)I\s", r"\1♪ ", ls[0], count=1)
+                ls[0] = re.sub(rf"^({PH}*\s*{DSH_OPT}{PH}*)I\s", r"\1♪ ", ls[0], count=1)
                 ls[-1] = re.sub(rf"\sI({PH}*)$", r" ♪\1", ls[-1])
                 work = "\n".join(ls)
                 rec.hit("ocr", 1, "♪ had been misread as I by OCR")
@@ -397,7 +435,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
             lead = m.group(0)[:m.start("label") - m.start()]
             if not lead:                                  # glued straight on: a line break got lost
                 return "\n"
-            return " -" if ("-" in lead and not opts.dialogue_dashes) else " "
+            return " -" if (re.search(f"[{DASHC}]", lead) and not opts.dialogue_dashes) else " "
 
         def midline(m):
             before = work[:m.start()]
@@ -422,7 +460,8 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
 
         def paren(m):
             inner = m.group(0)[1:-1]
-            if not _looks_like_annotation(inner):
+            if not _looks_like_annotation(inner) or \
+                    (_sounds_like_speech(inner) and _inside_sentence(m.string, m.start(), m.end())):
                 risky.append(inner)
             return " "
         work, hit = _sub_loop(PARENS, work, paren)
@@ -471,7 +510,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
         work = MUSIC_SEG.sub(seg, work)
         lines, in_lyric = [], False
         for l in work.split("\n"):
-            v = _visible(l).strip().lstrip("-").strip()
+            v = _strip_dash(_visible(l))
             has_note = any(ch in v for ch in MUSIC)
             starts = bool(v) and v[0] in MUSIC
             ends = bool(v) and v[-1] in MUSIC
@@ -482,7 +521,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
                 else:
                     lines.append(l)
                 continue
-            if in_lyric and not has_note and _visible(l).lstrip().startswith("-"):
+            if in_lyric and not has_note and _starts_dash(_visible(l)):
                 in_lyric = False                                      # "- OK, take off your clothes." – a new speaker
             if (in_lyric or starts or ends) and _has_words(v):
                 if starts and not ends:
@@ -547,7 +586,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
     if opts.sound_words and not (fmt == "ass" and re.search(r"\\(?:pos|move|k[fo]?\d|t\()", "".join(tags))):
         lines = []
         for l in work.split("\n"):
-            v = _visible(l).strip().lstrip("-").strip()
+            v = _strip_dash(_visible(l))
             if v and SOUND_LINE.match(v) and all(w.strip(",!") in ONOMATOPOEIA for w in v.replace(",", " ").split()):
                 rec.hit("sound_words")
                 lines.append(_tags_only(l))
@@ -563,7 +602,7 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
             v = _visible(l).strip()
             if not v:
                 continue
-            m = re.match(rf"^({PH}*\s*-?\s*{PH}*)['‘](?=\S)", l)
+            m = re.match(rf"^({PH}*\s*{DSH_OPT}{PH}*)['‘](?=\S)", l)
             if open_at is None and m and not CONTRACTION_START.match(_visible(l[m.end():])):
                 open_at = i
                 ls[i] = m.group(1) + l[m.end():]
@@ -583,11 +622,11 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
 
     # --- dialogue dashes
     if opts.dialogue_dashes:
-        work, n = re.subn(rf"(?<=[.!?…,])({PH}*)[ \t]+-(?!-)[ \t]*(?=[\uE000-\uF8FF{U}\"“'‘¿¡.])", r"\1 ", work)  # "do. -Oh, God."
+        work, n = re.subn(rf"(?<=[.!?…,])({PH}*)[ \t]+{DSH}[ \t]*(?=[\uE000-\uF8FF{U}\"“'‘¿¡.])", r"\1 ", work)  # "do. -Oh, God."
         if n:
             rec.hit("dashes")
         ls = work.split("\n")
-        new = [DASH_LINE.sub(r"\1", l, count=1) if _visible(l).lstrip().startswith("-") else l for l in ls]
+        new = [DASH_LINE.sub(r"\1", l, count=1) if _starts_dash(_visible(l)) else l for l in ls]
         if any(a != b and _has_words(_visible(b)) for a, b in zip(ls, new)):
             rec.hit("dashes")
         work = "\n".join(new)
@@ -604,12 +643,12 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
         l = re.sub(r"[ \t]{2,}", " ", l)
         l = re.sub(r"(?<!\.)\s+([,!?;:…]|\.(?!\.))", r"\1", l)
         l = re.sub(r"([,;])\s*[,;]+", r"\1", l)
-        l = re.sub(rf"^({PH}*\s*(?:-\s*)?{PH}*)\s*[,;:]+\s*", r"\1", l)   # leading ", " left by removal
+        l = re.sub(rf"^({PH}*\s*{DSH_OPT}{PH}*)\s*[,;:]+\s*", r"\1", l)   # leading ", " left by removal
         if opts.dialogue_dashes:
             l = re.sub(rf"^((?:{PH}|\s)*?)\s+(?=\S)", r"\1", l)             # "<i> It" -> "<i>It"
         else:
             l = re.sub(rf"^({PH}*)\s+", r"\1", l)
-            dm = re.match(rf"^{PH}*-(?!-)\s?", l)
+            dm = re.match(rf"^{PH}*{DSH}\s?", l)
             if dm:
                 l = dm.group(0) + re.sub(rf"^({PH}*)\s+", r"\1", l[dm.end():])
         l = re.sub(rf"({PH}*)\s+({PH}*)$", r"\1\2", l).rstrip()
@@ -625,8 +664,8 @@ def clean_cue(text: str, opts: CleanOptions, fmt: str = "srt", ctx: CueCtx | Non
 
     # A two-speaker cue that lost one speaker: drop the now-pointless dash (when dashes are kept)
     if not opts.dialogue_dashes:
-        orig_dashes = sum(1 for l in orig_lines if _visible(l).lstrip().startswith("-"))
-        dash_idx = [i for i, l in enumerate(kept) if _visible(l).lstrip().startswith("-")]
+        orig_dashes = sum(1 for l in orig_lines if _starts_dash(_visible(l)))
+        dash_idx = [i for i, l in enumerate(kept) if _starts_dash(_visible(l))]
         if orig_dashes >= 2 and len(dash_idx) == 1 and dash_idx[0] == 0:
             kept[0] = DASH_LINE.sub(r"\1", kept[0], count=1)
 
@@ -675,8 +714,8 @@ def analyse_doc(doc: SubtitleDoc) -> tuple[DocNotes, list[CueCtx]]:
 
     # OCR'd tracks: ♪ read as j" / (J' or as a leading + trailing I
     j = sum(1 for v in vis for l in v.split("\n")
-            if re.match(r'^\s*-?\s*j\s?"', l) or re.search(r'j\s?"\s*$', l) or "(J'" in l)
-    inote = sum(1 for v in vis if re.match(r"^\s*-?\s*I\s", v) and re.search(r"\sI$", v) and not REAL_I_END.search(v))
+            if re.match(rf'^\s*{DSH_OPT}j\s?"', l) or re.search(r'j\s?"\s*$', l) or "(J'" in l)
+    inote = sum(1 for v in vis if re.match(rf"^\s*{DSH_OPT}I\s", v) and re.search(r"\sI$", v) and not REAL_I_END.search(v))
     if j >= 3:
         dn.ocr_notes = "j"
     elif inote >= 3:
@@ -689,7 +728,7 @@ def analyse_doc(doc: SubtitleDoc) -> tuple[DocNotes, list[CueCtx]]:
 
     # 'Quoted' voices: off-screen/radio/narration wrapped in single quotes instead of italics
     def opens(v):
-        m = re.match(r"^\s*(?:\([^)]*\)\s*)?-?\s*['‘](?=\w)", v)
+        m = re.match(rf"^\s*(?:\([^)]*\)\s*)?{DSH_OPT}['‘](?=\w)", v)
         return bool(m) and not CONTRACTION_START.match(v[m.end():])
 
     def closes(v):

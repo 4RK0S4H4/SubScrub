@@ -63,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         ico.addPixmap(logo_pixmap(s, 1.0))
     app.setWindowIcon(ico)
 
+    try:
+        from . import media
+        media.remove_stale_temp_dirs()            # working folders an earlier crash left in %TEMP%
+    except Exception:  # noqa: BLE001
+        pass
     initial = [a for a in argv[1:] if os.path.exists(a)]
     win = MainWindow(initial)
     win.show()

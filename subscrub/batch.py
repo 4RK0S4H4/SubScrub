@@ -17,7 +17,7 @@ _ids = itertools.count(1)
 REFERENCE_OPTS = CleanOptions(lyrics=False, lyric_symbols=False, dialogue_dashes=False, onscreen_text=False,
                               ocr_fixes=False)
 SDH_RULES = {"brackets", "parentheses", "labels", "music", "sound_words"}
-NOT_DIALOGUE_TRACK = re.compile(r"comment|sign|song|forced|karaoke|lyrics only|descriptive|audio desc", re.I)
+NOT_DIALOGUE_TRACK = re.compile(r"\b(?:comment|sign|song|forced|karaoke|lyrics only|descriptive|audio desc)", re.I)
 
 
 @dataclass
@@ -167,10 +167,13 @@ def attach_sidecars(item: Item, log=None):
 def removable_sidecars(item: Item, keep_sdh: bool, mode: str) -> list[str]:
     """Subtitle files next to the video that become redundant once the cleaned track is inside it:
     the one that was cleaned (unless the SDH version is being kept) and other files in the same
-    language. Forced-subtitle files are never touched."""
+    language. Forced-subtitle files are never touched, and neither is an SDH file when a plain track was the
+    one cleaned (the SDH track stays)."""
     tr = item.track()
     if tr is None or not item.sidecars:
         return []
+    plain = plain_pick(item, tr)
+    keep_sdh = keep_sdh and not plain
     if mode == "sidecar":
         return [tr.external] if tr.external and not keep_sdh else []
     if mode != "replace":
@@ -183,7 +186,7 @@ def removable_sidecars(item: Item, keep_sdh: bool, mode: str) -> list[str]:
         if s.index == tr.index:
             if not keep_sdh:
                 out.append(s.external)
-        elif lang and media.lang_short(s.language) in (lang, ""):
+        elif lang and media.lang_short(s.language) in (lang, "") and not (plain and is_sdh(item, s)):
             out.append(s.external)
     return out
 
@@ -248,15 +251,43 @@ def pick_track(item: Item, pref: dict | None) -> int | None:
         else:
             cands = main
     dropped = {os.path.normcase(p) for p in item.dropped}
+    # a plain track already in the file wins over the SDH one (the user's decision, #20): clean that one for
+    # strays and make it the default. Only when there's no plain track is the SDH track cleaned.
+    plain = [t for t in cands if not is_sdh(item, t)]
+    if plain and not pref:
+        return max(plain, key=lambda t: (len(item.docs[t.index].cues) if t.index in item.docs else 0,
+                                         bool(t.external) and os.path.normcase(t.external) in dropped,
+                                         t.default, -t.sub_pos)).index
     return max(cands, key=lambda t: (is_sdh(item, t), bool(t.external) and os.path.normcase(t.external) in dropped,
                                      item.sdh_counts.get(t.index, -1), t.default, -t.sub_pos)).index
+
+
+def plain_pick(item: Item, t: media.SubTrack) -> bool:
+    """`t` is a regular track although the file also has an SDH track in the same language. Cleaning it catches
+    strays, the cleaned copy replaces it as the default, and the SDH track stays (just no longer the default)."""
+    if item.kind != "video" or is_sdh(item, t):
+        return False
+    lang = media.lang_short(t.language)
+    return any(o.index != t.index and o.text_based and o.index in item.docs and media.lang_short(o.language) == lang
+               and not _side_track(o) and is_sdh(item, o) for o in item.tracks())
+
+
+def auto_cleaned(item: Item, t: media.SubTrack) -> bool:
+    """Cleaned on save without the user forcing it: a subtitle file, an SDH track, or the plain track chosen
+    over an SDH one."""
+    return bool(t.external) or is_sdh(item, t) or plain_pick(item, t)
+
+
+def plain_to_default(item: Item, t: media.SubTrack) -> bool:
+    """A plain track with nothing to clean still has to be made the default."""
+    return not t.external and plain_pick(item, t) and not t.default
 
 
 def plain_partner(item: Item) -> int | None:
     """The regular (non-SDH) track in the same language as the selected one, to check our work against."""
     sel = item.track()
-    if sel is None or not item.info:
-        return None
+    if sel is None or not item.info or not is_sdh(item, sel):
+        return None                      # a plain track has nothing to be checked against
     lang = media.lang_short(sel.language)
     cands = [t for t in item.tracks() if t.text_based and t.index != sel.index and t.index in item.docs
              and media.lang_short(t.language) == lang and not _side_track(t) and not is_sdh(item, t)]

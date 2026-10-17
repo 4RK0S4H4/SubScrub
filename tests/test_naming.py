@@ -141,6 +141,34 @@ def test_api_key_and_errors():
         assert "key" in str(e)
 
 
+def test_hard_names_parse():
+    cases = [
+        ("Movie.Name.(2020).1080p.mkv", "Movie Name", 2020, None),
+        ("Mission.Impossible.-.Fallout.2018.mkv", "Mission Impossible - Fallout", 2018, None),
+        ("Show_S01E02.mkv", "Show", None, (1, [2])),
+        ("Movie Name [2020].mkv", "Movie Name", 2020, None),
+        ("Show Season 1 Episode 2.mkv", "Show", None, (1, [2])),
+        ("Show.S2024E01.mkv", "Show", None, (2024, [1])),
+        # names that already worked must keep working
+        ("Blade.Runner.2049.2017.2160p.mkv", "Blade Runner 2049", 2017, None),
+        ("Spider-Man.No.Way.Home.2021.1080p.mkv", "Spider-Man No Way Home", 2021, None),
+        ("Mr. Robot S01E01.mkv", "Mr. Robot", None, (1, [1])),
+        ("Movie.Name.[1080p].[YTS].mkv", "Movie Name", None, None),
+    ]
+    for name, title, year, ep in cases:
+        p = parse(name)
+        assert (p.title, p.year) == (title, year), (name, p)
+        assert ((p.season, p.episodes) == ep) if ep else not p.is_episode, (name, p)
+    assert render(Choice("episode", 1, "Show", None, 2024, [1]), ".mkv") == "Show S2024 E1.mkv"
+
+
+def test_hindi_code():
+    from subscrub import media
+    assert media.lang_short("hin") == "hi"
+    assert media.guess_language("Movie.hi.srt") == "und"         # ".hi." still means hearing impaired
+    assert media.guess_language("Movie.hin.srt") == "hin"
+
+
 if __name__ == "__main__":
     import inspect
     import sys

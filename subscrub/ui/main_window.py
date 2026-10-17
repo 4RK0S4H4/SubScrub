@@ -1037,9 +1037,43 @@ class MainWindow(QMainWindow):
         if d:
             self.add_paths([d])
 
+    def _offer_leftovers(self, leftovers: list):
+        """Unfinished copies from a save that was interrupted. Nothing is removed without asking."""
+        have = [lo for lo in leftovers if lo.original]
+        if have:
+            choice, _ = ask(self, "Unfinished Copies Found",
+                            "An earlier save was interrupted and left unfinished copies next to these videos. "
+                            "The videos themselves are fine. Move the leftovers to the Recycle Bin?",
+                            [("keep", "Keep Them", ""), ("remove", "Move to Recycle Bin", "primary")],
+                            rows=[(lo.name, fmt_size(lo.size)) for lo in have[:8]], more=max(0, len(have) - 8))
+            if choice == "remove":
+                from send2trash import send2trash
+                failed = []
+                for lo in have:
+                    try:
+                        send2trash(lo.path)
+                        self.log(f"Moved the unfinished copy {lo.path} to the Recycle Bin")
+                    except Exception as err:  # noqa: BLE001
+                        failed.append((lo.name, str(err)[:60]))
+                if failed:
+                    tell(self, "Couldn't Remove Everything", "These stay where they are:", rows=failed[:8])
+        for lo in (lo for lo in leftovers if not lo.original):
+            choice, _ = ask(self, "The Original Is Missing",
+                            f"“{lo.name}” is all that is left of this video: the original isn't in the folder. "
+                            "It may be incomplete, so nothing was removed.",
+                            [("leave", "Leave It", ""), ("restore", "Rename It Back", "primary")],
+                            "Renaming gives it the original name back. Check that it plays before relying on it.")
+            if choice == "restore":
+                try:
+                    new = media.restore_leftover(lo)
+                    self.log(f"Renamed {lo.path} back to {new}")
+                except (OSError, media.ToolError) as err:
+                    tell(self, "Couldn't Rename It", str(err))
+
     def add_paths(self, paths: list[str]):
         if self.busy():
             return
+        self._offer_leftovers(media.find_leftovers(paths))
         files, skipped = batch.expand_paths(paths)
         if skipped:
             tell(self, "Picture subtitles can't be cleaned",
@@ -1330,12 +1364,12 @@ class MainWindow(QMainWindow):
         res = it.result
         if res is None:
             return label_, "", "", True
-        if not it.force and not tr.external and not batch.is_sdh(it, tr):
+        if not it.force and not batch.auto_cleaned(it, tr):
             if has_tidy:
                 return f"{label_}: regular subtitles" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
             return f"{label_}: regular subtitles, nothing to strip", "No SDH", "dim", True
         n = final_changed(res)
-        if n == 0 and not tr.external:
+        if n == 0 and not tr.external and not batch.plain_to_default(it, tr):
             if has_tidy:
                 return f"{label_}: nothing to remove" + (f", {tidy}" if tidy else ""), "Ready", "ready", True
             return f"{label_}: nothing to remove", "Already Clean", "dim", True
@@ -1368,7 +1402,7 @@ class MainWindow(QMainWindow):
         tr = it.track()
         if it.result is None or it.state not in ("ready", "failed", "skipped") or tr is None:
             return ""
-        if not it.force and not tr.external and not batch.is_sdh(it, tr):
+        if not it.force and not batch.auto_cleaned(it, tr):
             return ""                                 # regular subtitles are skipped when saving: nothing is cleaned
         n = final_changed(it.result)
         return f"{n:,} to clean" if n else ""
@@ -1446,9 +1480,18 @@ class MainWindow(QMainWindow):
         note = self.add_note
         self.add_note_label.setText(note[:1].upper() + note[1:])
         self.add_note_label.setVisible(bool(note))
+        pending = [i for i in self.items if i.pending and i.loaded and i.track() is not None]
+        plain = sum(1 for i in pending if batch.plain_pick(i, i.track()))
+        if self.keep_sdh or plain == len(pending) and plain:
+            sdh_note = " and the SDH track is kept"
+        elif plain:
+            sdh_note = (". Files with a regular English track clean that one and keep the SDH track; "
+                        "otherwise the SDH track is dropped")
+        else:
+            sdh_note = " and the SDH track is dropped"
         how = {"replace": "Saving replaces each original, which goes to the Recycle Bin once the new file checks out. "
                           f"The cleaned track {'becomes the default' if self.make_default else 'is added'}"
-                          f"{' and the SDH track is kept' if self.keep_sdh else ' and the SDH track is dropped'}.",
+                          f"{sdh_note}.",
                "new": "Saving makes a new “.dialogue” copy next to each video.",
                "sidecar": "Saving writes a cleaned .srt next to each video."}[self.video_mode]
         if self.recycle_sub and self.video_mode == "replace" and any(i.sidecars for i in self.items):
@@ -1618,6 +1661,8 @@ class MainWindow(QMainWindow):
                         c.set_stat(f"{plural(n, 'sound or name note')}", "accent" if tr.index == it.sel else "")
                     elif tr.index == plain:
                         c.set_stat("Regular, used as a cross-check", "dim")
+                    elif tr.index == it.sel and batch.plain_pick(it, tr):
+                        c.set_stat("Regular, becomes the default", "accent")
                     else:
                         c.set_stat("Regular subtitles", "dim")
                 c.set_selected(tr.index == it.sel)
@@ -1677,7 +1722,7 @@ class MainWindow(QMainWindow):
         self.prev_file.setVisible(multi)
         self.next_file.setVisible(multi)
         tr = it.track()
-        nosdh = bool(tr) and it.loaded and not it.force and not tr.external and not batch.is_sdh(it, tr)
+        nosdh = bool(tr) and it.loaded and not it.force and not batch.auto_cleaned(it, tr)
         self.nosdh_wrap.setVisible(nosdh)
         self.preview.set_preview_only(nosdh)
         if nosdh:
@@ -1711,7 +1756,7 @@ class MainWindow(QMainWindow):
                 if new != other.sel:
                     other.sel, other.overrides = new, {}
                     self._queue_recalc(other)
-        it.force = bool(tr) and not tr.external and not batch.is_sdh(it, tr)   # picked a regular track on purpose
+        it.force = bool(tr) and not batch.auto_cleaned(it, tr)   # picked a regular track on purpose
         self._compute_result(it)
         self._update_row(it)
         self.show_review(it.uid)
@@ -1997,7 +2042,7 @@ class MainWindow(QMainWindow):
             return
         loaded = [i for i in scope if i.state == "ready" and i.result is not None]
         unseen = [i for i in scope if i.state in ("queued", "probing", "reading")]
-        sdh_ok = lambda i: i.force or (i.track() is not None and (bool(i.track().external) or batch.is_sdh(i, i.track())))
+        sdh_ok = lambda i: i.force or (i.track() is not None and batch.auto_cleaned(i, i.track()))
         flagged = [i for i in loaded if sdh_ok(i) and i.result.unresolved()]
         single = len(scope) == 1
 
@@ -2314,6 +2359,14 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._fit_side)
             QTimer.singleShot(0, self._fit_toolbar)
 
+    @staticmethod
+    def _wait_for(thread, seconds: float):
+        """Wait for a worker thread to finish while keeping the window alive (so "Stopping…" shows)."""
+        end = time.monotonic() + seconds
+        while thread.isRunning() and time.monotonic() < end:
+            QApplication.processEvents()
+            thread.wait(100)
+
     def closeEvent(self, e):
         if self.busy():
             choice, _ = ask(self, "Still saving", "Files are still being written. Stop and discard the one in "
@@ -2322,10 +2375,11 @@ class MainWindow(QMainWindow):
                 e.ignore()
                 return
             self.batch_worker.cancel.set()
-            self.batch_worker.wait(15000)
+            self.set_status("Stopping…")
+            self._wait_for(self.batch_worker, 300)      # until the tool is really gone, so no temp file is left
         if self.loader is not None and self.loader.isRunning():
             self.loader.cancel.set()
-            self.loader.wait(3000)
+            self._wait_for(self.loader, 30)
         for it in self.items:
             if it.tmpdir:
                 shutil.rmtree(it.tmpdir, ignore_errors=True)

@@ -311,7 +311,7 @@ class SettingsDialog(GlassDialog):
         lay.addSpacing(4)
         self.default_row = OptionRow("Make the Cleaned Track the Default", "Jellyfin and players pick it automatically.",
                                      win.make_default)
-        self.keep_row = OptionRow("Keep the SDH Track Too", "Off: the SDH track is replaced by the clean one.",
+        self.keep_row = OptionRow("Keep the SDH Track Too", "Off: the SDH track is replaced by the clean one. Doesn't apply when the file has a regular English track.",
                                   win.keep_sdh)
         lay.addWidget(self.default_row)
         lay.addWidget(self.keep_row)
@@ -436,7 +436,7 @@ class SettingsDialog(GlassDialog):
         keep, default = self.keep_row.isChecked(), self.default_row.isChecked()
         if m == "replace":
             t = (f"Rewrites the video with the cleaned track{' as the default' if default else ''}"
-                 f"{', keeping the SDH track as a backup' if keep else ' in place of the SDH track'}. "
+                 f"{', keeping the SDH track as a backup' if keep else ' in place of the SDH track (a regular English track is cleaned instead when there is one, and the SDH track stays)'}. "
                  "The new file is checked before the old one goes to the Recycle Bin.")
         elif m == "new":
             t = "Saves “Movie.dialogue.mkv” next to the original, which isn't touched."

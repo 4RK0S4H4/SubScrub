@@ -168,6 +168,74 @@ def test_main_flows_and_dialogs():
         pump(0.1)
 
 
+def test_close_mid_save_waits_for_the_worker():
+    """Closing while a save runs must not give up on the thread (a leftover .subscrub-tmp file, or a crash on exit)."""
+    import threading
+    from PySide6.QtCore import QThread
+
+    class Slow(QThread):
+        def __init__(self):
+            super().__init__()
+            self.cancel = threading.Event()
+            self.finished_cleanly = False
+
+        def run(self):
+            self.cancel.wait(10)
+            time.sleep(0.6)                      # the tool takes a moment to exit and the temp file to go
+            self.finished_cleanly = True
+
+    s = _Settings()
+    s.clear()
+    s.sync()
+    w = mw.MainWindow()
+    w.show()
+    pump(0.2)
+    worker = Slow()
+    w.batch_worker = worker
+    worker.start()
+    old_ask = mw.ask
+    mw.ask = lambda *a, **k: ("stop", False)
+    try:
+        w.close()
+    finally:
+        mw.ask = old_ask
+    assert not worker.isRunning() and worker.finished_cleanly
+    pump(0.1)
+
+
+def test_unfinished_copies_are_offered_never_deleted_silently():
+    import types
+    import sys
+    d = tempfile.mkdtemp(dir=TMP)
+    for name in ("A.mkv", "A.subscrub-tmp.mkv", "B.subscrub-tmp.mp4"):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(b"x" * 10)
+    los = mw.media.find_leftovers([d])
+    assert [(lo.name, bool(lo.original)) for lo in los] == [("A.subscrub-tmp.mkv", True), ("B.subscrub-tmp.mp4", False)]
+    s = _Settings()
+    s.clear()
+    s.sync()
+    w = mw.MainWindow()
+    asked = []
+    old_ask, old_tell = mw.ask, mw.tell
+    trashed = []
+    sys.modules["send2trash"] = types.SimpleNamespace(send2trash=lambda p: (trashed.append(p), os.remove(p)))
+    try:
+        mw.ask = lambda win, title, *a, **k: (asked.append(title), ("keep" if title.startswith("Unfinished") else "leave"),
+                                              False)[1:]
+        w._offer_leftovers(los)
+        assert asked == ["Unfinished Copies Found", "The Original Is Missing"]
+        assert os.path.exists(os.path.join(d, "A.subscrub-tmp.mkv")) and not trashed       # "Keep Them" removes nothing
+        assert os.path.exists(os.path.join(d, "B.subscrub-tmp.mp4"))                       # "Leave It" too
+        mw.ask = lambda win, title, *a, **k: ("remove" if title.startswith("Unfinished") else "restore", False)
+        w._offer_leftovers(los)
+    finally:
+        mw.ask, mw.tell = old_ask, old_tell
+    assert trashed == [os.path.join(d, "A.subscrub-tmp.mkv")] and os.path.exists(os.path.join(d, "A.mkv"))
+    assert os.path.exists(os.path.join(d, "B.mp4")) and not os.path.exists(os.path.join(d, "B.subscrub-tmp.mp4"))
+    w.close()
+
+
 if __name__ == "__main__":
     import inspect
     import sys

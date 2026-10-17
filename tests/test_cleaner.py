@@ -43,6 +43,51 @@ def test_dialogue_dashes():
     assert c("- One\n- Two", keep) == "- One\n- Two"
 
 
+def test_unicode_dialogue_dashes():
+    for dash in "-–—‐‑−":
+        assert c(f"{dash} Hi.") == "Hi.", dash
+        assert c(f"{dash}Hi.") == "Hi.", dash
+        assert c(f"{dash} Hi.\n{dash} Hey.") == "Hi.\nHey.", dash
+        assert c(f"{dash} JOHN: Hi.") == "Hi.", dash
+        assert c(f"Hi. {dash} Hey.") == "Hi. Hey.", dash
+    assert c("-- Wait.") == "Wait." and c("-- What?") == "What?"
+    assert c("Hi. -- Hey.") == "Hi. Hey."
+    # interruptions inside a sentence, stutters and trailing dashes stay
+    for keep in ("Wait — what?", "Wait – what?", "I'm--I'm sorry.", "--and then he left.", "Wait-", "I-I-I don't know.",
+                 "Wait - what?", "Uh-huh."):
+        assert c(keep) == keep, keep
+    keep_dashes = CleanOptions(dialogue_dashes=False)
+    assert c("– Hi.\n– [coughs] Hey.", keep_dashes) == "– Hi.\n– Hey."
+
+
+def test_ass_soft_breaks():
+    ass = ("[Script Info]\nTitle: t\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+           "Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,- Hi.\\n- soft break\n"
+           "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\an8}– Hi.\\N– Hey.\n"
+           "Dialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,(sighs)\\nFine.\\NOK.\n"
+           "Dialogue: 0,0:00:07.00,0:00:08.00,Default,,0,0,0,,Untouched\\nline\\Nhere\n")
+    doc = sf.parse(ass, "ass")
+    assert doc.cues[0].text == "- Hi.\n- soft break"
+    out = clean_doc(doc, O).render()
+    lines = [l for l in out.split("\n") if l.startswith("Dialogue")]
+    assert lines[0].endswith(",,Hi.\\nsoft break")              # both dashes gone, the soft break written back as it was
+    assert lines[1].endswith(",,{\\an8}Hi.\\NHey.")
+    assert lines[2].endswith(",,Fine.\\NOK.")                   # a line was removed: the break left is a hard one
+    assert lines[3].endswith(",,Untouched\\nline\\Nhere")       # untouched cues come back byte for byte
+
+
+def test_parentheses_that_could_be_dialogue_are_flagged():
+    for text, clean in (("Mom (she's in the car) is fine.", "Mom is fine."),
+                        ("We need 2 (two) guns.", "We need 2 guns."),
+                        ("I (and I mean this) love you.", "I love you.")):
+        r = clean_cue(text, O)
+        assert r.text == clean and r.risk >= 2 and any("dialogue" in w for w in r.why), (text, r)
+    for text, clean in (("(sighs) Fine.", "Fine."), ("Fine. (sighs)", "Fine."), ("He (sighs) agreed.", "He agreed."),
+                        ("(door opens)\nHi.", "Hi.")):
+        r = clean_cue(text, O)
+        assert r.text == clean and r.risk == 0, (text, r)
+
+
 def test_speaker_labels():
     assert c("JOHN: I told you.") == "I told you."
     assert c("- JOHN: Hi.\n- MARY: Hey.") == "Hi.\nHey."

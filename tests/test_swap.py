@@ -81,6 +81,57 @@ def test_rename_fails_after_original_moved_keeps_new_file():
     assert work.read_text(encoding="utf-8") == "new"           # never deleted once the original has moved
 
 
+def _info(subs=1, attach=1, chapters=2, kind="mkv", cleaned=True, **kw):
+    streams = [{"codec_type": "video"}, {"codec_type": "audio"}] + [{"codec_type": "attachment"}] * attach
+    tracks = [media.SubTrack(2 + i, i, "subrip", "eng", "English", False, False, False, {}, cleaned=cleaned and i == 0)
+              for i in range(subs)]
+    return media.MediaInfo("x.mkv", kind, "matroska", 10.0, 1000, streams, tracks, chapters=chapters)
+
+
+def _verify(after, text="1\n00:00:01,000 --> 00:00:02,000\nHi.\n\n2\n00:00:03,000 --> 00:00:04,000\nYo.\n",
+            cues=2):
+    """Run media._verify with a stubbed probe and a stubbed cue count; returns the error text or ''."""
+    from subscrub import subformats
+    out = Path(tempfile.mkdtemp()) / "new.mkv"
+    out.write_text("data", encoding="utf-8")
+    before = _info()
+    before.size = 1000
+    after.size = 1000
+    old_probe, old_extract, old_load = media.probe, media.extract_subs, subformats.load
+    media.probe = lambda tools, path, log=None: after
+    media.extract_subs = lambda tools, info, tracks, d, *a, **k: {t.index: "x" for t in tracks}
+    subformats.load = lambda path, fmt=None: types.SimpleNamespace(cues=[0] * cues)
+    try:
+        media._verify(None, before, str(out), len(after.subs), None, new_text=text, fmt="srt", new_hint=("eng", "English"))
+        return ""
+    except media.ToolError as e:
+        return str(e)
+    finally:
+        media.probe, media.extract_subs, subformats.load = old_probe, old_extract, old_load
+
+
+def test_verify_accepts_a_good_copy():
+    assert _verify(_info()) == ""
+
+
+def test_verify_refuses_lost_fonts():
+    assert "attached files" in _verify(_info(attach=0))
+
+
+def test_verify_refuses_lost_chapters():
+    assert "chapters changed" in _verify(_info(chapters=0))
+
+
+def test_verify_refuses_a_track_that_lost_cues():
+    err = _verify(_info(), cues=0)
+    assert "0 lines instead of 2" in err and "nothing was replaced" in err
+
+
+def test_verify_finds_the_new_track_by_name_when_the_tag_is_lost():
+    assert _verify(_info(cleaned=False), cues=0).endswith("0 lines instead of 2")
+    assert _verify(_info(cleaned=False), cues=2) == ""
+
+
 if __name__ == "__main__":
     import inspect
     saved = (media.who_has_open, media.is_network_path, sys.modules.get("send2trash"))

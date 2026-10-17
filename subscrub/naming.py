@@ -39,8 +39,10 @@ _JUNK = r"""
     extended | unrated | uncut | remastered | imax | criterion | directors? | theatrical | hybrid | complete
 """
 _JUNK_RE = re.compile(rf"^(?:{_JUNK})$", re.I | re.X)
-_SXE = re.compile(r"\bS(\d{1,2})[ ._-]*E(\d{1,3})((?:[ ._-]*-?[ ._-]*E\d{1,3})*)", re.I)
+# "S01E02", "Show_S01E02" (an underscore is a word character, so no \b), "S2024E01" (a year as the season)
+_SXE = re.compile(r"(?<![A-Za-z0-9])S(\d{1,4})[ ._-]*E(\d{1,3})((?:[ ._-]*-?[ ._-]*E\d{1,3})*)", re.I)
 _NXN = re.compile(r"(?<![\d])(\d{1,2})x(\d{2,3})(?![\d])", re.I)
+_LONG = re.compile(r"(?<![A-Za-z0-9])(?:Season|Series)[ ._-]*(\d{1,4})[ ._,-]*Episode[ ._-]*(\d{1,3})", re.I)
 _YEAR = re.compile(r"^\(?(19\d\d|20\d\d)\)?$")
 _TV_HINT = re.compile(r"\b(?:season|series)\s*\d+\b", re.I)
 
@@ -59,8 +61,11 @@ class Parsed:
 
 
 def _words(text: str) -> list[str]:
+    text = re.sub(r"\[\s*((?:19|20)\d\d)\s*\]", r"(\1)", text)           # "Movie [2020]" is a year, not a tag
     text = re.sub(r"\[[^\]]*\]|\{[^}]*\}", " ", text)                  # [release group], {tags}
-    text = re.sub(r"(?<=\w)[._](?=\w)", " ", text)                       # Green.Lantern.S01 -> Green Lantern S01
+    text = re.sub(r"[._]+(?=[-–—][._\s])", " ", text)                    # Mission.Impossible.-.Fallout
+    text = re.sub(r"(?<=[-–—])[._]+(?=\w)", " ", text)
+    text = re.sub(r"(?<=[\w)\]])[._]+(?=[\w(\[])|(?<=\w)[._]+(?=[)\]])", " ", text)   # Green.Lantern.(2020).S01
     text = re.sub(r"_", " ", text)
     return [w for w in re.split(r"\s+", text) if w]
 
@@ -106,7 +111,7 @@ def _tidy(words: list[str]) -> str:
 
 def parse(filename: str) -> Parsed:
     stem = Path(filename).stem
-    m = _SXE.search(stem) or _NXN.search(stem)
+    m = _SXE.search(stem) or _NXN.search(stem) or _LONG.search(stem)
     if m:
         season, first = int(m.group(1)), int(m.group(2))
         eps = [first]
