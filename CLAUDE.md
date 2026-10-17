@@ -6,7 +6,7 @@ The cleaned track goes back into the video as the default, and the SDH track is 
 videos from TMDB (`The Walking Dead S7 E2.mkv`) and removes other-language subtitle tracks. It never re-encodes
 video. FFmpeg and MKVToolNix do the muxing.
 
-Current version: see `subscrub/__init__.py` (2.7.3 at hand-off). The history of every change is in `README.md`
+Current version: see `subscrub/__init__.py`. The history of every change is in `README.md`
 ("What's new") and `docs/HISTORY.md`.
 
 ## How we work together
@@ -54,15 +54,19 @@ python -m tests.test_batch
 python -m tests.test_naming
 python -m tests.test_swap
 python -m tests.test_library
+python -m tests.test_ui                                         # contrast (WCAG AA), main flows, every dialog
 python -m tests.test_pipeline <folder of sample videos>         # needs ffmpeg + mkvmerge, see docs/OPEN-ITEMS.md
 
 python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
-python tools/ui_screenshots.py <out> <video folder> dark|light [--save]   # 1080p screenshots for the visual check
+python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state
+python tools/ui_screenshots.py <out> samples/library dark|light [--save] [--size 1000x680]   # visual-check shots
+python tools/make_solar.py <solar.json>                         # regenerate subscrub/ui/solar.py from Iconify's set
 build.bat                                                       # local Windows build -> dist\SubScrub.exe
 ```
 
 CI: `.github/workflows/build.yml` runs the tests and builds `SubScrub.exe` on `windows-latest` for every push and
-PR (the exe is attached to the run). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
+PR (the exe is attached to the run). A second job on Linux makes the sample library and attaches screenshots of
+every screen in both themes (artifact "screenshots"). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
 To ship a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then start the
 `build` workflow on main with the version typed in (Actions, "Run workflow", or the `actions_run_trigger` tool).
 It checks the version matches `__init__.py`, creates the tag and publishes the Release. (Cloud Claude Code sessions
@@ -80,13 +84,19 @@ can't push tags, so don't try `git push` of a tag.)
   (`%LOCALAPPDATA%\SubScrub\renames.jsonl`).
 - `subscrub/batch.py`: queue items, track picking, sidecar `.srt` pairing, rename helpers.
 - `subscrub/app.py`: entry point. Loads the bundled Inter font.
-- `subscrub/ui/main_window.py`: welcome, file list, review (sidebar plus preview), settings and the dialogs.
+- `subscrub/ui/main_window.py`: the window: top bar with tabs, welcome, file list, review (sidebar plus preview),
+  footer.
+- `subscrub/ui/dialogs.py`: every dialog (Settings, the "not sure" choice, title picker, files in use, tools, log,
+  About) and `ask()` / `tell()`, which replace QMessageBox. All are in-window `GlassDialog`s.
+- `subscrub/ui/workers.py`: background threads (load, save, lock check) and small formatting helpers.
 - `subscrub/ui/preview.py`: the caption "screen", the timeline and the before/after list.
 - `subscrub/ui/theme.py`: colour tokens (DARK/LIGHT), the style sheet, fonts, `num_font()`, the title-bar colour.
-- `subscrub/ui/glass.py`: window backdrop, card panels, optional Windows 11 Mica.
-- `subscrub/ui/widgets.py`: rows, badges (`StatusTag`), the segmented control, toggles, Solar icon drawing.
+- `subscrub/ui/glass.py`: window backdrop (cached), card panels, `GlassDialog`, optional Windows 11 Mica.
+- `subscrub/ui/widgets.py`: painted controls: rows, badges, the segmented control (also the tabs), toggles, track
+  tiles, the settings nav, rounded tooltips (`set_tip`) and menus (`make_menu`), Solar icon drawing.
 - `subscrub/ui/solar.py`: Solar icon SVGs (CC BY 4.0). `subscrub/ui/fonts.py`: Inter as base64 (OFL).
-- `tests/`: the test suites and fixtures. `tools/`: screenshot driver, corpus checker, PowerShell extractor.
+- `tests/`: the test suites and fixtures. `tools/`: screenshot driver, Solar generator, corpus checker, PowerShell
+  extractor.
 
 ## Rules the user decided (don't change without asking)
 
@@ -104,19 +114,34 @@ can't push tags, so don't try `git push` of a tag.)
   (und tracks are kept). The user doesn't use Radarr/Sonarr. The TMDB key is entered in Settings; never commit one.
 - English tracks only matter to the user.
 
-## Look (S4 Studio style, decided 2026-10-10)
+## Look (S4 Glass, decided 2026-10-17)
 
-- One accent, crimson `#C81E3A` (accent-2 `#9F1239`, light `#FDA4AF`). Everything else is monochrome: neutral greys,
-  no red-tinted surfaces, and only a faint neutral bloom in dark mode.
-- Crimson is used only for the primary button, switches, the selected segment or track, and things that need
-  checking. Status badges: ok green, warn amber, attention red.
+Mockup the user approved: https://claude.ai/artifact/67nXdn4nt8ehRWbJhs6Gbg (design canvas, both themes).
+
+- One accent, crimson `#C81E3A` (accent-2 `#9F1239`, light `#FDA4AF`). Neutrals carry a faint crimson tint (S4
+  tinted neutrals; the user chose this over the 2.7 pure greys). The formulas live in `theme.tokens()`. Dark mode is
+  a 165° gradient with two faint accent blooms; cards are glass with a hairline border and a lit top edge.
+- Crimson is used only for the primary button, switches, the selected tab, segment or track, and things that need
+  checking. A file's state is a slim bar on its left edge plus one badge: ok green, warn amber, attention red.
+- Labels, buttons, tabs, card titles and options in Title Case. Messages, hints, descriptions and dialog questions
+  ("Which title is this?") in sentence case.
+- Layout: a top bar (logo, Files/Review tabs, tools state, theme, Settings, ⋯) and a footer bar (status, progress,
+  the one primary button). Settings, About, the log and every question open inside the window over a blurred, dimmed
+  view (`GlassDialog`), never as a QMessageBox or a separate window.
 - Inter (bundled) with `ss01` and `cv09` app-wide. Tabular figures (`num_font()`) go on counts and timecodes only:
-  Inter's `tnum` widens hyphens.
-- Solar icons. 9–12px corners, hairline borders, soft shadows. The primary button glows only in dark mode.
-- Qt trap: a border-radius larger than half the widget's height is drawn square. Pill shapes take their radius from
-  the real height at runtime (see `Segmented.resizeEvent`). Never hard-code pill radii.
+  Inter's `tnum` widens hyphens. Solar icons (linear, duotone for big ones).
+- 8–12px corners, hairline borders, soft shadows. The primary button glows only in dark mode. Focus rings show for
+  keyboard focus only (`KeyboardFocus`).
+- Painted widgets (segmented control, toggles, badges, track tiles, the preview rows) read `theme.CURRENT`. The style
+  sheet covers buttons, fields, menus and label roles (`objectName`, e.g. `Hint`, `CardTitle`).
+- Qt traps: a border-radius larger than half the widget's height is drawn square, so pills take their radius from
+  the real height at runtime; never hard-code pill radii. A dynamic property must not share a name with a Qt
+  property (`size`, `icon`): buttons use `btnsize` and `iconOnly`. QToolTip and native menus can't have round
+  corners: use `set_tip()` and `make_menu()`.
 - Badges hug their text. Cards fit their content. A hint that applies to every row is said once in the summary.
   When there's nothing left to do, hide the primary button instead of greying it out.
+- Speed (the user noticed lag in 2.7): no app-wide event filters; cache fonts, icons and row layouts; when one line
+  changes, update that row (`PreviewPanel.update_cue`) instead of rebuilding the list.
 
 ## Screenshots and the visual check (do this for any UI change)
 
@@ -128,7 +153,8 @@ can't push tags, so don't try `git push` of a tag.)
    and 9, flat-top 3), badges stretched across a column, square corners on pills, repeated messages, cards
    stretched over empty space, greyed-out leftover buttons, labels that contradict the badge next to them,
    accent colour on things that don't need attention, inconsistent alignment or corner radii, low-contrast text in
-   dark mode, wrong capitalisation (a capital after a comma, Title Case headings), stray punctuation, missing icons.
+   dark mode, wrong capitalisation (a sentence-case label or button, a Title Case message, a capital after a
+   comma), stray punctuation, missing icons. Also check a small window (`--size 1000x680`).
 3. Fix what you find and capture again, at most two rounds. Send the user separate 1920×1080 images, one screen per
    file, named like `03-review-dark.png`. Never combine screens into one image or shrink a screen to fit more in.
    Show dialogs composited over the dimmed window.
@@ -137,8 +163,8 @@ can't push tags, so don't try `git push` of a tag.)
 
 Layout rules from the skill that apply here: one primary (accent-filled) button per area, hiding it when there's
 nothing to do; global top-bar actions stay in the same place on every screen (disable, don't remove); headings and
-card titles in sentence case (all-caps only for tiny group labels); headers stay uncluttered, with counts as quiet
-secondary text; say a hint once, not on every row; cards fit their content.
+card titles in Title Case (the user's choice); headers stay uncluttered, with counts as quiet secondary text; say a
+hint once, not on every row; cards fit their content.
 
 ## Data and privacy
 

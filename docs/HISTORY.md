@@ -22,11 +22,19 @@ a future maintainer needs.
   dialog choices have a bold title with a quieter description, and saved rows read "renamed from …".
 - **v2.7.3:** Qt draws a border-radius larger than half the height as square, which made the selected segment a red
   rectangle. Pill radii now come from the real height at runtime.
+- **v2.8.0:** the S4 Glass overhaul. The user approved a mockup on a design canvas first and chose a top bar with
+  tabs, Title Case labels and tinted neutrals (replacing 2.7's pure greys). The UI was rebuilt: painted widgets that
+  read the theme tokens, in-window glass dialogs instead of QMessageBox, `dialogs.py` and `workers.py` split out of
+  `main_window.py`. The user had noticed lag in Review; profiling found a Python event filter on every app event,
+  QTextDocuments built for every row height, fonts rebuilt on every paint and 2,000 antialiased timeline marks.
+  Caching those and updating one row instead of rebuilding the list made toggling a line about 4× faster.
+  `tests/test_ui.py` now guards text contrast and the main flows, and CI attaches screenshots of every screen.
 
 ## Testing approach
 
 - Unit-style suites in `tests/` run anywhere (offscreen Qt).
 - `test_pipeline` runs real ffmpeg and mkvmerge against sample videos.
-- UI changes are checked by driving the real window offscreen (`tools/ui_screenshots.py`) and reading every 1080p
-  screenshot at full size. The user reviews on a phone, so send separate images, never a collage.
+- UI changes are checked by driving the real window offscreen (`tools/ui_screenshots.py`) on the generated sample
+  library (`tests.make_samples --library`) and reading every 1080p screenshot at full size, plus a 1000×680 pass.
+  The user reviews on a phone, so send separate images, never a collage.
 - TMDB was only tested with a fake client (`tests/test_naming.py`); the sandbox had no access to TMDB.
