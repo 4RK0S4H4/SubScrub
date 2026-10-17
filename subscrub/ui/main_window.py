@@ -32,7 +32,7 @@ from .dialogs import (LYRIC_MODES, RULES, SUB_MODES, VIDEO_MODES, AboutDialog, D
 from .glass import GlassDialog, Panel
 from .preview import PreviewPanel
 from .theme import qc
-from .widgets import (T, Banner, Bar, ElidedLabel, FileRow, Legend, LinkButton, RuleRow, ScreenView, Segmented,
+from .widgets import (T, Banner, Bar, ElidedLabel, FileRow, KeyHints, Legend, LinkButton, RuleRow, ScreenView, Segmented,
                       StatusTag, Tips, TrackCard, button, draw_icon, hline, icon, icon_button, label, logo_pixmap,
                       hide_tip, make_menu, refresh_icons, set_prop, set_tip, themed_icon)
 from .workers import (CANCELLED, BatchWorker, Bus, LockCheck, Worker, final_changed, fmt_duration, fmt_size,  # noqa: F401
@@ -168,6 +168,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F3"), self, activated=lambda: self.preview.step(1))
         QShortcut(QKeySequence("Shift+F3"), self, activated=lambda: self.preview.step(-1))
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.toggle_current_line)
+        # Review: J / K move through the lines, O keeps the original (plain letters, so typing in a field is unaffected)
+        QShortcut(QKeySequence("J"), self, activated=lambda: self._review_key(lambda: self.preview.move(1)))
+        QShortcut(QKeySequence("K"), self, activated=lambda: self._review_key(lambda: self.preview.move(-1)))
+        QShortcut(QKeySequence("O"), self, activated=lambda: self._review_key(self.toggle_current_line))
         QShortcut(QKeySequence("Escape"), self, activated=lambda: self.show_files() if self.page() == 2 else None)
         QShortcut(QKeySequence("Alt+Left"), self, activated=lambda: self.show_files() if self.page() == 2 else None)
         QShortcut(QKeySequence("Ctrl+,"), self, activated=self.show_settings)
@@ -594,7 +598,7 @@ class MainWindow(QMainWindow):
         self.legend = Legend()
         ph.addWidget(self.legend, 1)
         self.undo_btn = button("Keep Original", "", "sm", self.toggle_current_line, icon_kind="undo",
-                               tip="Put the selected line back the way it was (Ctrl+Z, or double-click a line)")
+                               tip="Put the selected line back the way it was (O, Ctrl+Z, or double-click a line)")
         self.undo_btn.setMinimumWidth(132)
         self._undo_text, self._undo_compact = " Keep Original", False
         ph.addWidget(self.undo_btn)
@@ -625,6 +629,9 @@ class MainWindow(QMainWindow):
         pl.setContentsMargins(6, 6, 4, 4)
         pl.addWidget(self.preview_stack)
         v.addWidget(pp, 1)
+        self.key_hints = KeyHints([(["J", "K"], "Next or previous line"), (["O"], "Keep original"),
+                                   (["F3"], "Next change"), (["Ctrl", "Z"], "Undo a line")])
+        v.addWidget(self.key_hints)
         body.addWidget(main, 1)
         return page
 
@@ -1852,6 +1859,10 @@ class MainWindow(QMainWindow):
             return
         self.render_review(keep_cue=cue)
 
+    def _review_key(self, fn):
+        if self.page() == self.PAGE_REVIEW and not self.busy() and self.preview_stack.currentIndex() == 1:
+            fn()
+
     def toggle_current_line(self):
         if self.page() != self.PAGE_REVIEW:
             return
@@ -1963,7 +1974,7 @@ class MainWindow(QMainWindow):
         what = ("Put the selected line back the way it was" if label == "Keep Original"
                 else "Use the cleaned text for the selected line again")
         set_tip(b, (f"{label}: {what[0].lower()}{what[1:]}" if self._undo_compact else what) +
-                " (Ctrl+Z, or double-click a line)")
+                " (O, Ctrl+Z, or double-click a line)")
 
     def _fit_toolbar(self):
         """On a narrow window the line button shows just its icon, so the filter is never cut off."""

@@ -329,6 +329,50 @@ def test_tmdb_offline_or_wrong_key_leaves_names_alone():
         naming.time.sleep = old_sleep
 
 
+def test_review_shortcuts_move_and_keep_original():
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    def press(key: str):
+        # an offscreen window is never the "active" one, so the keystroke itself can't be sent: fire its shortcut
+        sc = [x for x in w.findChildren(QShortcut) if x.key() == QKeySequence(key)]
+        assert len(sc) == 1, (key, len(sc))
+        sc[0].activated.emit()
+
+    w = _window()
+    w.add_paths([_sub_file("Show S01E04.en.sdh.srt")])
+    wait_for(lambda: w.items and all(i.state in ("ready", "failed", "skipped") for i in w.items))
+    w.tabs.changed.emit("review")
+    pump(0.3)
+    w.filter.set_value("all")
+    w._filter_changed("all")
+    pump(0.2)
+    first = w.preview.current_row()
+    press("J")
+    pump(0.05)
+    second = w.preview.current_row()
+    assert second is not None and (first is None or second.cue != first.cue)
+    press("K")
+    pump(0.05)
+    assert w.preview.current_row().cue == (first.cue if first is not None else second.cue) or first is None
+    # O puts the selected changed line back as it was, and again takes the cleaned version
+    it = w.items[0]
+    w.preview.step(1)
+    row = w.preview.current_row()
+    assert row is not None and row.status != "kept"
+    press("O")
+    pump(0.1)
+    assert it.overrides.get(row.cue) == "orig"
+    press("O")
+    pump(0.1)
+    assert it.overrides.get(row.cue) != "orig"
+    # the keys do nothing on the Files screen
+    w.show_files()
+    pump(0.1)
+    press("O")
+    assert it.overrides.get(row.cue) != "orig"
+    w.close()
+
+
 if __name__ == "__main__":
     import inspect
     import sys
