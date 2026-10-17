@@ -50,22 +50,16 @@ class DemoScreen(ScreenView):
 
 
 class LogoMark(QWidget):
-    """The app's mark in the top bar, with a faint edge in dark mode so it doesn't sink into the bar."""
+    """The app's mark in the top bar. Its own lit top edge keeps it from sinking into the bar in dark mode."""
 
     def __init__(self, size: int):
         super().__init__()
         self.setFixedSize(size, size)
 
     def paintEvent(self, _):
-        t = T()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.drawPixmap(0, 0, logo_pixmap(self.width()))
-        if t["is_dark"]:
-            from PySide6.QtGui import QPen
-            p.setPen(QPen(qc("rgba(255,255,255,0.14)"), 1))
-            r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-            p.drawRoundedRect(r, self.width() * 0.24, self.width() * 0.24)
 
 
 class DragVeil(QWidget):

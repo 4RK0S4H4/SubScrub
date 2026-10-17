@@ -68,6 +68,7 @@ python -m tests.make_samples --library                          # samples/librar
 python tools/ui_screenshots.py <out> samples/library dark|light [--save] [--size 1000x680]   # visual-check shots
 python tools/readme_screenshots.py                              # remake docs/screenshots (README) from the sample library
 python tools/make_solar.py <solar.json>                         # regenerate subscrub/ui/solar.py from Iconify's set
+python tools/make_icon.py                                       # regenerate assets/subscrub.ico + .png from logo_pixmap
 build.bat                                                       # local Windows build -> dist\SubScrub.exe
 ```
 

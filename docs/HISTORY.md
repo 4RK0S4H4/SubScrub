@@ -29,6 +29,11 @@ a future maintainer needs.
   QTextDocuments built for every row height, fonts rebuilt on every paint and 2,000 antialiased timeline marks.
   Caching those and updating one row instead of rebuilding the list made toggling a line about 4× faster.
   `tests/test_ui.py` now guards text contrast and the main flows, and CI attaches screenshots of every screen.
+- **v3.0.0:** batches 1-4 (cleaning fixes, safer saving, the regular English track first, Review shortcuts, the
+  installer and update check, tests on generated media in CI, the README rewrite) plus a new icon. The user compared
+  a dozen drafts on HTML pages and a design canvas, picked "Struck Tag" and asked for a rounded square in the old
+  icon's colours. `logo_pixmap` is the single source: `tools/make_icon.py` renders every .ico size from it, with a
+  bolder version at 24 px and below rather than a scaled-down 256.
 
 ## Testing approach
 
