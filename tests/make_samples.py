@@ -94,7 +94,23 @@ def pipeline_samples(tools, out: Path) -> tuple[Path, Path]:
 # ============================================================================ edge cases
 
 def _tiny_video(run, tools, out: Path, subs: list[tuple[Path, str, str, str]], seconds: int = 20):
-    """A short black-frame MKV with subtitle tracks (file, language, title, disposition); none when `subs` is empty."""
+    """A short black-frame MKV with subtitle tracks (file, language, title, disposition); none when `subs` is empty.
+
+    FFmpeg makes the picture and sound; the subtitle tracks go in with mkvmerge when it is there. On the Windows CI
+    runner (FFmpeg from Chocolatey) encoding the lavfi sources and muxing .srt inputs in one command stalled for
+    good, while the same command takes a fraction of a second with the Linux builds."""
+    if subs and tools.mkvmerge:
+        base = out.with_name(out.stem + "_base.mkv")
+        _tiny_video(run, tools, base, [], seconds)
+        cmd = [tools.mkvmerge, "-q", "-o", str(out), str(base)]
+        for f, lang, title, disp in subs:
+            flags = disp.split("+")
+            cmd += ["--language", f"0:{lang}", "--track-name", f"0:{title}", "--sub-charset", "0:UTF-8",
+                    "--default-track-flag", f"0:{int('default' in flags)}",
+                    "--hearing-impaired-flag", f"0:{int('hearing_impaired' in flags)}", str(f)]
+        run(cmd)
+        base.unlink()
+        return
     cmd = [tools.ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
            f"color=c=black:s=160x90:r=1:d={seconds}", "-f", "lavfi", "-i", f"anullsrc=r=8000:cl=mono:d={seconds}"]
     for f, *_ in subs:
@@ -104,7 +120,7 @@ def _tiny_video(run, tools, out: Path, subs: list[tuple[Path, str, str, str]], s
     for k, (_, lang, title, disp) in enumerate(subs):
         cmd += [f"-metadata:s:s:{k}", f"language={lang}", f"-metadata:s:s:{k}", f"title={title}",
                 f"-disposition:s:{k}", disp]
-    run(cmd + ["-shortest", str(out)])
+    run(cmd + [str(out)])                        # both sources already stop after `seconds`
 
 
 def _cues(path: Path, texts: list[str], encoding: str = "utf-8"):
