@@ -18,6 +18,24 @@ have 1–4 lines each that the app asks about.
 
 After that, just run `dist\SubScrub.exe` (build.bat can add a desktop shortcut). You can move the exe anywhere.
 
+## What's new in 2.8
+
+**A rebuilt interface (S4 Glass), and a faster Review screen.** Nothing about how files are cleaned, renamed or
+saved has changed.
+
+- A top bar with **Files** and **Review** tabs. Settings, the light/dark switch and the ⋯ menu stay in the same place
+  on every screen, and the main button sits in the footer.
+- Glass cards over a softly tinted backdrop: the greys now carry a faint hint of the crimson accent. Crimson still
+  only marks the main button, switches, the selected item and lines to check.
+- Each file shows its state as a coloured bar on its left edge plus one badge.
+- Settings, About, the activity log and every question open inside the window over a blurred background instead of
+  as separate windows. Menus and tooltips have rounded corners.
+- Labels and buttons in Title Case; messages and questions in plain sentences.
+- Review responds faster: "Keep Original" on a line is about 4× quicker, stepping through lines about 4×, switching
+  filters and scrolling about 2×.
+- On a small window the Review toolbar shows "Keep Original" as an icon so the filters always fit.
+- About shows the version and credits.
+
 ## What's new in 2.6
 
 **A glass look.** Frosted, translucent panels with lit edges over a soft backdrop, in dark and light. SubScrub paints its own backdrop by default and colours the title bar to match; Settings → "Use Windows' Mica backdrop (Windows 11)" switches to Mica instead (restart needed).

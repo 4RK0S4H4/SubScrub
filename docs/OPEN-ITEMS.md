@@ -7,6 +7,10 @@ can't push tags); the installer does not install FFmpeg/MKVToolNix (the app's in
 banner and the user clicks Update (no automatic download); no code signing, the user clicks "Run anyway" once per
 version. Still open: the local AI check.
 
+Decided by the user (2026-10-17, v2.8.0): S4 Glass look with a top bar and Files/Review tabs, Title Case labels,
+neutrals with a faint crimson tint (instead of pure greys). Approved from a mockup:
+https://claude.ai/artifact/67nXdn4nt8ehRWbJhs6Gbg
+
 ## Next up: install and update (the user's stated priority)
 
 Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Python and builds the exe) and runs
@@ -37,13 +41,12 @@ Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Pyt
   MP4 needs two subtitle tracks, and the sample MKV needs a font attachment and chapters. Extend `make_samples`
   so the pipeline test runs on generated media, then add it to CI (install ffmpeg and mkvtoolnix with choco on
   the runner).
-- Add a CI job that runs `tools/ui_screenshots.py` in both themes and uploads the PNGs as an artifact, so every PR
-  has screenshots to check.
+- Done in 2.8.0: CI attaches screenshots of every screen in both themes (job "screenshots", generated media only).
 
 ## Ideas the user has mentioned (not started)
 
 - Keyboard shortcuts in Review (J/K to move between lines, a key for "Keep original"), shown as keycaps.
-- An About screen with version, credits (Inter OFL, Solar CC BY 4.0) and the update check.
+- The update check in About (the About screen with version and credits exists since 2.8.0).
 - **(ask)** An optional local AI check for edge cases. The user has an RTX 4070. The earlier recommendation was a
   narrow, opt-in feature that only suggests fixes for lines already marked "to check", run by a small local model,
   never auto-applied. The user wasn't sure it's worth it.

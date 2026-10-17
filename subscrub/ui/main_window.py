@@ -447,6 +447,8 @@ class MainWindow(QMainWindow):
         for i in range(lay.count()):
             w = lay.itemAt(i).widget()
             if w is not None and not w.isHidden():
+                if w.layout() is not None:
+                    w.layout().activate()
                 h += max(w.sizeHint().height(), w.minimumSizeHint().height())
         m = self.files_panel.layout().contentsMargins()
         h += m.top() + m.bottom() + 2
@@ -537,6 +539,7 @@ class MainWindow(QMainWindow):
 
         # ---- main: the file, what will change, and the preview
         main = QWidget()
+        self.review_main = main
         v = QVBoxLayout(main)
         v.setContentsMargins(4, 0, 0, 0)
         v.setSpacing(0)
@@ -593,6 +596,7 @@ class MainWindow(QMainWindow):
         self.undo_btn = button("Keep Original", "", "sm", self.toggle_current_line, icon_kind="undo",
                                tip="Put the selected line back the way it was (Ctrl+Z, or double-click a line)")
         self.undo_btn.setMinimumWidth(132)
+        self._undo_text, self._undo_compact = " Keep Original", False
         ph.addWidget(self.undo_btn)
         nav = QHBoxLayout()
         nav.setSpacing(2)
@@ -1402,6 +1406,10 @@ class MainWindow(QMainWindow):
         if it.output and it.output != it.path:
             tip += f"\nSaved as {it.output}"
         set_tip(row, tip)
+        lines = (bool(line), prog is None, review and not self.busy())
+        if getattr(row, "_lines", None) != lines:        # a line came or went: the card still fits its rows
+            row._lines = lines
+            QTimer.singleShot(0, self._fit_files)
         if it.uid == self.review_uid and self.page() == self.PAGE_REVIEW:
             self._update_review_head()
 
@@ -1671,6 +1679,7 @@ class MainWindow(QMainWindow):
         tr = it.track()
         nosdh = bool(tr) and it.loaded and not it.force and not tr.external and not batch.is_sdh(it, tr)
         self.nosdh_wrap.setVisible(nosdh)
+        self.preview.set_preview_only(nosdh)
         if nosdh:
             self.nosdh_banner.label.setText(
                 "This file only has regular subtitles, with no sound descriptions or speaker names to strip. " +
@@ -1870,6 +1879,7 @@ class MainWindow(QMainWindow):
         st = res.stats
         flagged = self._update_legend(it)
         self.filter.set_option_visible("check", flagged > 0)
+        QTimer.singleShot(0, self._fit_toolbar)
         show = self.filter.value()
         if show == "check" and not flagged:
             show = "changes"
@@ -1898,7 +1908,33 @@ class MainWindow(QMainWindow):
         row = self.preview.current_row()
         ok = row is not None and row.status != "kept"
         self.undo_btn.setEnabled(ok)
-        self.undo_btn.setText(" Use Cleaned" if ok and row.override == "orig" else " Keep Original")
+        self._undo_text = " Use Cleaned" if ok and row.override == "orig" else " Keep Original"
+        self._apply_undo_text()
+
+    def _apply_undo_text(self):
+        b = self.undo_btn
+        label = self._undo_text.strip()
+        b.setText("" if self._undo_compact else self._undo_text)
+        what = ("Put the selected line back the way it was" if label == "Keep Original"
+                else "Use the cleaned text for the selected line again")
+        set_tip(b, (f"{label}: {what[0].lower()}{what[1:]}" if self._undo_compact else what) +
+                " (Ctrl+Z, or double-click a line)")
+
+    def _fit_toolbar(self):
+        """On a narrow window the line button shows just its icon, so the filter is never cut off."""
+        need = (self.filter.sizeHint().width() + 132 + self.prev_btn.width() * 2 + 78 + 4 + 14 * 3 + 90)
+        compact = self.review_main.width() < need
+        if compact == self._undo_compact:
+            return
+        self._undo_compact = compact
+        b = self.undo_btn
+        set_prop(b, "iconOnly", compact)
+        if compact:
+            b.setFixedWidth(32)
+        else:
+            b.setMinimumWidth(132)
+            b.setMaximumWidth(16777215)
+        self._apply_undo_text()
 
     def _empty(self, text):
         self.preview_empty.setText(text)
@@ -2276,6 +2312,7 @@ class MainWindow(QMainWindow):
             self.veil.setGeometry(self.root.rect())
         if self.page() == self.PAGE_REVIEW:
             QTimer.singleShot(0, self._fit_side)
+            QTimer.singleShot(0, self._fit_toolbar)
 
     def closeEvent(self, e):
         if self.busy():

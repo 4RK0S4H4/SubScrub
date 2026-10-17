@@ -954,7 +954,7 @@ class TrackCard(QWidget):
         if getattr(track, "external", ""):
             meta_bits += [f"{track.lang_label}, next to the video"]
         else:
-            if track.title and track.title.lower() != track.lang_label.lower():
+            if track.title and track.lang_label.lower() not in track.title.lower():
                 meta_bits.append(track.lang_label)
             meta_bits.append(f"track {track.sub_pos + 1}")
         meta = ", ".join(meta_bits)

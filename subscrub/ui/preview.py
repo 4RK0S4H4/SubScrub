@@ -598,6 +598,7 @@ class ColumnHeader(QWidget):
     def __init__(self, view: PreviewList):
         super().__init__()
         self.view = view
+        self.after = "After, as Saved"
         self.setFixedHeight(24)
 
     def paintEvent(self, _):
@@ -606,7 +607,7 @@ class ColumnHeader(QWidget):
         p.setFont(theme.font(12, 600))
         p.setPen(qc(t["text2"]))
         x_time, x_before, x_after, col_w = columns(self.view.viewport().width())
-        for x, s in ((x_time, "Time"), (x_before, "Before"), (x_after, "After, as Saved")):
+        for x, s in ((x_time, "Time"), (x_before, "Before"), (x_after, self.after)):
             p.drawText(QRectF(x, 0, col_w, self.height()), Qt.AlignLeft | Qt.AlignVCenter, s)
         p.end()
 
@@ -633,11 +634,21 @@ class PreviewPanel(QWidget):
         self._starts: list[float] = []
         self._result: CleanResult | None = None
         self._syncing = False
+        self.preview_only = False             # a file that is saved without cleaning: show what cleaning would do
         self.scrub.scrubbed.connect(self._on_scrub)
         self.list.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.list.selectionModel().currentChanged.connect(self._on_current)
         self.position_changed.connect(self._update_screen)
 
+
+    def set_preview_only(self, on: bool):
+        """The file is saved without cleaning (regular subtitles only): say "if cleaned", not "as saved"."""
+        if on == self.preview_only:
+            return
+        self.preview_only = on
+        self.header.after = "After, if Cleaned" if on else "After, as Saved"
+        self.header.update()
+        self._update_screen()
     def set_theme(self, *_):
         self.list.delegate.set_theme()
         self.scrub.set_theme()
@@ -693,7 +704,9 @@ class PreviewPanel(QWidget):
         elif row.flagged:
             right, alert = "Check: " + (row.why or "judgement call"), True
         else:
-            right, alert = {"removed": "Removed", "edited": "Cleaned", "kept": "Unchanged"}[row.status], False
+            names = ({"removed": "Would Be Removed", "edited": "Would Change", "kept": "Unchanged"} if self.preview_only
+                     else {"removed": "Removed", "edited": "Cleaned", "kept": "Unchanged"})
+            right, alert = names[row.status], False
         if row.after is None:
             self.screen.show_line("", when, right, alert, placeholder="Nothing on screen: this whole line is removed")
         else:
