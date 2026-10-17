@@ -1647,7 +1647,9 @@ class MainWindow(QMainWindow):
         self.add_note_label.setVisible(bool(note))
         pending = [i for i in self.items if i.pending and i.loaded and i.track() is not None]
         plain = sum(1 for i in pending if batch.plain_pick(i, i.track()))
-        if self.keep_sdh or plain == len(pending) and plain:
+        if not pending:
+            sdh_note = ""                                  # everything is saved: nothing left to say about SDH tracks
+        elif self.keep_sdh or plain == len(pending) and plain:
             sdh_note = " and the SDH track is kept"
         elif plain:
             sdh_note = (". Files with a regular English track clean that one and keep the SDH track; "

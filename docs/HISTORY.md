@@ -38,3 +38,40 @@ a future maintainer needs.
   library (`tests.make_samples --library`) and reading every 1080p screenshot at full size, plus a 1000×680 pass.
   The user reviews on a phone, so send separate images, never a collage.
 - TMDB was only tested with a fake client (`tests/test_naming.py`); the sandbox had no access to TMDB.
+
+## Release notes of older versions
+
+Moved here from the README, which keeps only the latest two versions.
+
+### Version 2.7
+
+**A new look (S4 Studio style).** One crimson accent (`#C81E3A`) and everything else monochrome: neutral off-white in light mode with white cards; in dark mode, glass (translucent cards over a near-black gradient). Crimson is kept for the main button, switches, the selected pill and track, and anything that needs checking. Inter (bundled), Solar icons, 9-12px corners, hairline borders, badge-style statuses, and a crimson app icon. The Windows 11 Mica backdrop is still an opt-in in Settings. Nothing about how files are cleaned has changed.
+
+2.7.1 also updates the pipeline test for the "English" track name introduced in 2.5.
+
+2.7.2 fixes from a full visual check: hyphens no longer look spaced out ("Spider-Man", "On-screen"); status badges hug their text instead of stretching; "Add a TMDB key…" is said once in the summary instead of on every row; the file list card fits its rows; no greyed-out "All done" button after saving; the choice buttons in the "not sure" and title dialogs have a bold title over a quieter description; saved rows say "renamed from <old name>".
+
+2.7.3: the selected option in segmented controls (Settings, Review filters, Song lyrics) is a rounded pill again instead of a red rectangle on some displays.
+
+Credits: Inter (SIL OFL 1.1, see `assets/fonts/OFL-Inter.txt`); Solar icon set by 480 Design (CC BY 4.0).
+
+### Version 2.6
+
+**A glass look.** Frosted, translucent panels with lit edges over a soft backdrop, in dark and light. SubScrub paints its own backdrop by default and colours the title bar to match; Settings → "Use Windows' Mica backdrop (Windows 11)" switches to Mica instead (restart needed).
+
+### Version 2.5
+
+**One-step prep for new downloads.** Besides cleaning the subtitles, SubScrub can now:
+
+- **Rename videos from TMDB.** `Batman V Super Dawn of Justice 2160 HDR DV DDP.mkv` becomes `Batman v Superman - Dawn of Justice.mkv`. Episodes become `The Walking Dead S7 E2.mkv` (two-part files read `S2 E1-E2`). Names are made Windows-safe (`:` becomes ` - `, no `? * " < > | / \`). Pure renaming: no folders are created, and the year is off unless you turn on "Add the year to movie names". Matching sidecar `.srt` files are renamed with the video.
+- **Ask when unsure.** If the title isn't a clear match, the file shows "Not sure which title this is". Choose from the closest matches, search by title, or keep the name (Review, or when you save).
+- **Tidy the subtitle tracks.** The cleaned track is called just "English" (or whatever language it is). Subtitle tracks in other languages are removed; forced tracks and tracks with no language stay.
+- **Undo.** ⋯ → "Undo last renames…" puts the previous names back.
+
+Setup: renaming needs a free TMDB API key (themoviedb.org → Settings → API). Paste it in Settings → Names and tracks. Renaming and the tidy-up apply when originals are replaced, and like any rewrite they stop torrents from seeding the file.
+
+### Version 2.4
+
+A redesigned interface: a bundled typeface, a quieter file list with line counts,
+a Review screen with the track and edit choices in a sidebar, and the caption "screen". Saving is also safer:
+replacing a video can no longer end with neither the old nor the new file, whatever Windows reports.

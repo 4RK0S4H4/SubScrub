@@ -63,6 +63,7 @@ python -m tests.test_edge                                        # awkward files
 python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
 python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state
 python tools/ui_screenshots.py <out> samples/library dark|light [--save] [--size 1000x680]   # visual-check shots
+python tools/readme_screenshots.py                              # remake docs/screenshots (README) from the sample library
 python tools/make_solar.py <solar.json>                         # regenerate subscrub/ui/solar.py from Iconify's set
 build.bat                                                       # local Windows build -> dist\SubScrub.exe
 ```
