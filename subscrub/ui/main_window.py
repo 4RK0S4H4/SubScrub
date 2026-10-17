@@ -17,12 +17,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import (QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSettings, Qt, QTimer, QUrl,
+                            Signal)
+from PySide6.QtGui import QDesktopServices, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
                                QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__, batch, media, naming
+from .. import APP_NAME, __version__, batch, media, naming, updates
 from ..batch import Item
 from ..cleaner import CleanOptions
 from . import glass, theme
@@ -124,6 +125,9 @@ class MainWindow(QMainWindow):
         self._recalc: list[int] = []
         self._winget_procs: list[subprocess.Popen] = []
         self._preview_key = None
+        self.update: updates.Update | None = None      # a newer version GitHub has told us about
+        self._updating = False                         # downloading the installer
+        self._update_worker: Worker | None = None
         self._load_prefs()
 
         self._recalc_timer = QTimer(self)
@@ -182,6 +186,7 @@ class MainWindow(QMainWindow):
             pass
         self.log(f"{APP_NAME} {__version__}. FFmpeg: {self.tools.ffmpeg or 'not found'}; "
                  f"MKVToolNix: {self.tools.mkvmerge or 'not found'}")
+        QTimer.singleShot(5000, self._auto_check_updates)
         if initial_paths:
             paths = [initial_paths] if isinstance(initial_paths, str) else list(initial_paths)
             QTimer.singleShot(0, lambda: self.add_paths(paths))
@@ -195,7 +200,7 @@ class MainWindow(QMainWindow):
         return self.item(self.review_uid)
 
     def busy(self) -> bool:
-        return self._saving or bool(self.batch_worker and self.batch_worker.isRunning())
+        return self._saving or self._updating or bool(self.batch_worker and self.batch_worker.isRunning())
 
     def page(self) -> int:
         return self.stack.currentIndex()
@@ -228,6 +233,8 @@ class MainWindow(QMainWindow):
         self.drop_langs = s.value("drop_langs", "true") == "true"
         self.glass = s.value("mica", "false") == "true"
         self.tmdb_key = s.value("tmdb_key", "") or ""
+        self.update_check = s.value("update_check", "true") == "true"
+        self.update_skipped = s.value("update_skipped", "") or ""
 
     def _save_prefs(self):
         s = self.settings
@@ -244,6 +251,8 @@ class MainWindow(QMainWindow):
         s.setValue("drop_langs", "true" if self.drop_langs else "false")
         s.setValue("tmdb_key", self.tmdb_key)
         s.setValue("mica", "true" if self.glass else "false")
+        s.setValue("update_check", "true" if self.update_check else "false")
+        s.setValue("update_skipped", self.update_skipped)
 
     # ------------------------------------------------------------------ build
     def _build(self):
@@ -256,6 +265,7 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         v.addWidget(self._build_topbar())
+        v.addWidget(self._build_update_banner())
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_welcome())
         self.stack.addWidget(self._build_files())
@@ -301,6 +311,8 @@ class MainWindow(QMainWindow):
             ("gear", self.more_menu.addAction("Settings…", self.show_settings)),
             ("restart", self.more_menu.addAction("Tools and Paths…", self.show_tools)),
             ("log", self.more_menu.addAction("Activity Log", self.show_log)),
+            ("restart", self.more_menu.addAction("Check for Updates…", lambda: self.check_for_updates(
+                True, self._manual_update_result))),
             ("history", self.more_menu.addAction("Undo Last Renames…", self.undo_renames)),
         ]
         self.more_menu.addSeparator()
@@ -309,6 +321,24 @@ class MainWindow(QMainWindow):
         lay.addLayout(acts)
         self.topbar = bar
         return bar
+
+    def _build_update_banner(self):
+        """A quiet strip under the top bar, on every screen, when a newer version exists."""
+        self.update_wrap = QWidget()
+        lay = QHBoxLayout(self.update_wrap)
+        lay.setContentsMargins(32, 12, 32, 0)
+        inner = QWidget()
+        inner.setMaximumWidth(1120)
+        il = QVBoxLayout(inner)
+        il.setContentsMargins(0, 0, 0, 0)
+        self.update_banner = Banner("", "Update", self.install_update, tone="info")
+        self.update_banner.layout().addWidget(button("Later", "subtle", "sm", self._update_later), 0, Qt.AlignVCenter)
+        il.addWidget(self.update_banner)
+        lay.addStretch(1)
+        lay.addWidget(inner, 100)
+        lay.addStretch(1)
+        self.update_wrap.hide()
+        return self.update_wrap
 
     def _show_more(self):
         b = self.more_btn
@@ -971,6 +1001,7 @@ class MainWindow(QMainWindow):
         self.name_year = dlg.year_row.isChecked()
         self.drop_langs = dlg.langs_row.isChecked()
         self.tmdb_key = dlg.key_edit.text().strip()
+        self.update_check = dlg.update_row.isChecked()
         if self.tmdb_key != old_key:
             self._tmdb = None
             for it in self.items:
@@ -1001,6 +1032,132 @@ class MainWindow(QMainWindow):
 
     def show_log(self):
         LogDialog("\n".join(self.log_lines), self).exec()
+
+    # ------------------------------------------------------------------ updates
+    def _auto_check_updates(self):
+        """Once a day at most, a few seconds after start, when the user hasn't switched it off."""
+        if os.environ.get("SUBSCRUB_NO_UPDATE_CHECK") or not self.update_check:
+            return
+        try:
+            last = float(self.settings.value("update_last", 0) or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if time.time() - last < 20 * 3600:
+            return
+        self.check_for_updates(False)
+
+    def check_for_updates(self, manual: bool = False, then=None):
+        """Ask GitHub for the newest release. `then(result)` gets an Update, None (up to date) or an error text."""
+        if self._update_worker is not None and self._update_worker.isRunning():
+            return
+        w = Worker(lambda prog, cancel: updates.check(__version__), self)
+        w.ok.connect(lambda r: self._update_checked(r, manual, then))
+        w.err.connect(lambda m: self._update_check_failed(m, manual, then))
+        self._update_worker = w
+        w.start()
+
+    def _update_checked(self, upd, manual: bool, then):
+        self._update_worker = None
+        self.settings.setValue("update_last", time.time())
+        if upd is not None:
+            self.log(f"Update found: {upd.version} ({'installer' if upd.can_install else 'no installer'})")
+            if manual or upd.version != self.update_skipped:
+                self._show_update(upd)
+        if then:
+            then(upd)
+
+    def _update_check_failed(self, msg: str, manual: bool, then):
+        self._update_worker = None
+        self.log(f"Update check failed: {msg}")
+        if then:
+            then(msg)
+
+    def _show_update(self, upd):
+        self.update = upd
+        self.update_banner.label.setText(f"SubScrub {upd.version} is available.")
+        self.update_banner.button.setText("Update" if upd.can_install and updates.is_installed() else "Download")
+        self.update_wrap.show()
+
+    def _update_later(self):
+        if self.update is not None:
+            self.update_skipped = self.update.version
+            self.settings.setValue("update_skipped", self.update_skipped)
+        self.update_wrap.hide()
+
+    def _manual_update_result(self, result):
+        if isinstance(result, str):
+            tell(self, "Couldn't Check for Updates", result)
+        elif result is None:
+            tell(self, "You're Up to Date", f"SubScrub {__version__} is the newest version.")
+        else:
+            choice, _ = ask(self, f"SubScrub {result.version} Is Available",
+                            f"You have {__version__}. Updating takes a moment and SubScrub restarts by itself."
+                            if result.can_install and updates.is_installed() else
+                            f"You have {__version__}. The new version is on the download page.",
+                            [("later", "Later", ""), ("go", "Update" if result.can_install and updates.is_installed()
+                                                      else "Open Download Page", "primary")])
+            if choice == "go":
+                self.install_update()
+
+    def install_update(self):
+        """Download the installer, run it quietly and quit. Never while a save is running."""
+        upd = self.update
+        if upd is None or self._updating:
+            return
+        if self.busy():
+            tell(self, "Saving Is Still Running", "Update once the files have finished saving.")
+            return
+        if not (upd.can_install and updates.is_installed()):
+            QDesktopServices.openUrl(QUrl(upd.page))              # a loose exe or a source copy updates by hand
+            self.log(f"Opened {upd.page}")
+            return
+        pending = [i for i in self.items if i.pending]
+        if pending:
+            choice, _ = ask(self, "Update Now?", f"Updating restarts SubScrub, and the {plural(len(pending), 'file')} "
+                            "in the list will be cleared. Nothing has been changed in them.",
+                            [("cancel", "Not Now", ""), ("go", "Update and Restart", "primary")])
+            if choice != "go":
+                return
+        self._updating = True
+        self.progress.setRange(0, 1000)
+        self.progress.setValue(0)
+        self.progress.show()
+        self.cancel_btn.show()
+        self._update_buttons()
+        self.set_status(f"Downloading SubScrub {upd.version}…")
+        w = Worker(lambda prog, cancel: updates.download(upd, None, lambda f: prog(f, "Downloading"), cancel), self)
+        w.progress.connect(self._update_progress)
+        w.ok.connect(self._update_downloaded)
+        w.err.connect(self._update_failed)
+        self._update_worker = w
+        w.start()
+
+    def _update_progress(self, frac: float, _msg: str):
+        if frac >= 0:
+            self.progress.setValue(int(frac * 1000))
+            self.set_status(f"Downloading SubScrub {self.update.version}… {int(frac * 100)}%")
+
+    def _update_downloaded(self, path: str):
+        self._update_worker = None
+        self.set_status(f"Installing SubScrub {self.update.version}. It restarts by itself.")
+        self.log(f"Running {path}")
+        try:
+            updates.run_installer(path)
+        except OSError as e:
+            self._update_failed(f"The installer couldn't be started ({e}).")
+            return
+        self._updating = False
+        QTimer.singleShot(300, self.close)
+
+    def _update_failed(self, msg: str):
+        self._update_worker = None
+        self._updating = False
+        self.progress.hide()
+        self.cancel_btn.hide()
+        self._update_buttons()
+        self.set_status("")
+        if "stopped" not in msg:
+            tell(self, "The Update Didn't Install", msg + " SubScrub is unchanged.")
 
     def show_about(self):
         AboutDialog(self).exec()
@@ -2198,6 +2355,9 @@ class MainWindow(QMainWindow):
         w.start()
 
     def cancel_save(self):
+        if self._updating and self._update_worker is not None:
+            self._update_worker.cancel.set()
+            return
         if self.busy():
             self.batch_worker.cancel.set()
             self.set_status("Stopping…")

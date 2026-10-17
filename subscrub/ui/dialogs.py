@@ -248,9 +248,41 @@ class AboutDialog(GlassDialog):
                             ("Solar icons by 480 Design", "CC BY 4.0"),
                             ("Muxing by FFmpeg and MKVToolNix", "")])
         self.body_layout.addWidget(credits)
+        self._alive = True
+        self.finished.connect(lambda *_: setattr(self, "_alive", False))
+        self.update_status = label("", "Muted", True)
+        self.update_btn = button("Check for Updates", "", "", self._check_updates)
+        urow = QHBoxLayout()
+        urow.setSpacing(10)
+        urow.addWidget(self.update_status, 1)
+        urow.addWidget(self.update_btn)
+        self.body_layout.addLayout(urow)
         ok = button("Close", "primary", "", self.accept)
         ok.setDefault(True)
         self.add_footer_buttons(ok)
+
+
+    def _check_updates(self):
+        win = self.win
+        if win is None:
+            return
+        self.update_btn.setEnabled(False)
+        self.update_status.setText("Checking…")
+        win.check_for_updates(True, self._update_result)
+
+    def _update_result(self, result):
+        if not self._alive:
+            return
+        self.update_btn.setEnabled(True)
+        if isinstance(result, str):
+            self.update_status.setText(result)
+        elif result is None:
+            self.update_status.setText(f"You're up to date. {__version__} is the newest version.")
+        else:
+            self.update_status.setText(f"SubScrub {result.version} is available.")
+            self.update_btn.setText("Update")
+            self.update_btn.clicked.disconnect()
+            self.update_btn.clicked.connect(lambda: (self.accept(), self.win.install_update()))
 
 
 # ============================================================================ settings
@@ -396,6 +428,9 @@ class SettingsDialog(GlassDialog):
         self.confirm_row = OptionRow("Ask Before Rewriting Files in Place", "A last check before originals are "
                                      "replaced.", win.confirm_replace)
         lay.addWidget(self.confirm_row)
+        self.update_row = OptionRow("Check for Updates Automatically", "Looks once a day when SubScrub starts. "
+                                    "Nothing is downloaded until you click Update.", win.update_check)
+        lay.addWidget(self.update_row)
         self.glass_row = OptionRow("Use Windows' Mica Backdrop (Windows 11)", "Tints the window with your wallpaper "
                                    "instead of SubScrub's own backdrop. Applies the next time SubScrub starts.",
                                    win.glass)
@@ -464,6 +499,7 @@ class SettingsDialog(GlassDialog):
         self.rename_row.setChecked(True)
         self.year_row.setChecked(False)
         self.langs_row.setChecked(True)
+        self.update_row.setChecked(True)
         self._hints()
 
     def options(self) -> CleanOptions:
