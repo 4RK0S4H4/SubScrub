@@ -138,6 +138,11 @@ class BatchWorker(QThread):
                         for i in unresolved:
                             res.overrides[i] = "orig"
                 n = final_changed(res)
+                if not any(res.final(i) is not None for i in range(len(res.doc.cues))):
+                    # nothing would be left: an empty file, or a track that is nothing but sound descriptions
+                    self._tidy_or_skip(it, uid, tidy, "this subtitle track is empty" if not res.doc.cues else
+                                       "every line would be removed, so the subtitles were left alone", prog)
+                    continue
                 if n == 0 and not job["force"] and not track.external and not batch.plain_to_default(it, track):
                     self._tidy_or_skip(it, uid, tidy, "already clean", prog)
                     continue

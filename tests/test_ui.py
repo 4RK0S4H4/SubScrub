@@ -236,6 +236,99 @@ def test_unfinished_copies_are_offered_never_deleted_silently():
     w.close()
 
 
+def _window(**settings):
+    s = _Settings()
+    s.clear()
+    s.setValue("sub_mode", "new")
+    s.setValue("confirm_replace", "false")
+    for k, v in settings.items():
+        s.setValue(k, v)
+    s.sync()
+    w = mw.MainWindow()
+    w.resize(1280, 800)
+    w.show()
+    pump(0.2)
+    return w
+
+
+def _sub_file(name: str) -> str:
+    d = tempfile.mkdtemp(dir=TMP)
+    p = os.path.join(d, name)
+    shutil.copy(os.path.join(FIX, "sdh_en.srt"), p)
+    return p
+
+
+def test_adding_the_same_file_twice_adds_it_once():
+    w = _window()
+    p = _sub_file("Show S01E02.en.sdh.srt")
+    w.add_paths([p])
+    w.add_paths([p])
+    w.add_paths([os.path.join(os.path.dirname(p), ".", os.path.basename(p))])      # spelled differently
+    wait_for(lambda: w.items and all(i.state in ("ready", "failed", "skipped") for i in w.items))
+    assert len(w.items) == 1 and len(w.rows) == 1, [i.path for i in w.items]
+    w.close()
+
+
+def test_save_pressed_twice_starts_one_batch():
+    w = _window()
+    w.add_paths([_sub_file("Show S01E03.en.sdh.srt")])
+    wait_for(lambda: w.items and all(i.state in ("ready", "failed", "skipped") for i in w.items))
+    made = []
+    real = mw.BatchWorker
+
+    class Counting(real):
+        def __init__(self, *a, **k):
+            made.append(1)
+            super().__init__(*a, **k)
+
+    old_exec = dialogs.DecisionDialog.exec
+    dialogs.DecisionDialog.exec = lambda self: (setattr(self, "choice", "guess"), QDialog.Accepted)[1]
+    mw.DecisionDialog.exec = dialogs.DecisionDialog.exec
+    mw.BatchWorker = Counting
+    try:
+        w.start_save()
+        w.start_save()
+        w.start_save()
+        wait_for(lambda: not w.busy(), 60)
+    finally:
+        mw.BatchWorker = real
+        dialogs.DecisionDialog.exec = old_exec
+        mw.DecisionDialog.exec = old_exec
+    assert len(made) == 1, made
+    w.close()
+
+
+def test_tmdb_offline_or_wrong_key_leaves_names_alone():
+    import urllib.error
+    from subscrub import batch, media, naming
+
+    def offline(req, timeout=None):
+        raise urllib.error.URLError("no network")
+
+    def refused(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+
+    old_sleep = naming.time.sleep
+    naming.time.sleep = lambda _s: None
+    try:
+        for opener, text in ((offline, "Couldn't reach TMDB"), (refused, "didn't accept the API key")):
+            w = _window(rename_on="true", video_mode="replace", tmdb_key="k" * 32)
+            w._tmdb = naming.TMDB("k" * 32, opener=opener)
+            it = mw.Item(path=os.path.join(TMP, "Some.Show.S01E02.1080p.mkv"), kind="video")
+            it.info = media.MediaInfo(it.path, "mkv", "matroska", 600.0, 1000, [], [])
+            it.state = "ready"
+            w.items.append(it)
+            w._pump_names()
+            wait_for(lambda: it.name_state in ("error", "done"), 20)
+            assert it.name_state == "error" and text in it.name_note, (it.name_state, it.name_note)
+            assert batch.new_name(it) is None and w._new_name(it) is None          # the file keeps its name
+            assert w.name_line(it)[1] == "alert" and text in w.name_line(it)[0]
+            w.items.remove(it)
+            w.close()
+    finally:
+        naming.time.sleep = old_sleep
+
+
 if __name__ == "__main__":
     import inspect
     import sys

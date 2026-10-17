@@ -56,7 +56,8 @@ python -m tests.test_naming
 python -m tests.test_swap
 python -m tests.test_library
 python -m tests.test_ui                                         # contrast (WCAG AA), main flows, every dialog
-python -m tests.test_pipeline <folder of sample videos>         # needs ffmpeg + mkvmerge, see docs/OPEN-ITEMS.md
+python -m tests.test_pipeline                                    # makes its own sample videos (ffmpeg + mkvmerge)
+python -m tests.test_edge                                        # awkward files through the real save path
 
 python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
 python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state

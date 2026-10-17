@@ -23,7 +23,8 @@ FIX = ROOT / "tests" / "fixtures"
 
 def _runner(tools):
     kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    return lambda cmd: subprocess.run(cmd, check=True, **kw)
+    # no stdin (a tool waiting for a key press would hang a CI run) and a limit, so a stuck tool is an error
+    return lambda cmd: subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL, timeout=180, **kw)
 
 
 def main():
@@ -33,28 +34,162 @@ def main():
     if "--library" in sys.argv:
         library(tools)
         return
+    if "--edge" in sys.argv:
+        edge_cases(tools, ROOT / "samples" / "edge")
+        return
     out = ROOT / "samples"
     out.mkdir(exist_ok=True)
-    av = out / "_av.mp4"
+    mkv, mp4 = pipeline_samples(tools, out)
+    print(f"Made:\n  {mkv}\n  {mp4}")
+
+
+_CHAPTERS = """;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=30000
+title=One
+[CHAPTER]
+TIMEBASE=1/1000
+START=30000
+END=60000
+title=Two
+"""
+
+
+def pipeline_samples(tools, out: Path) -> tuple[Path, Path]:
+    """The two videos tests.test_pipeline runs on: an MKV with a regular and an SDH English track, a Spanish ASS
+    track, a font attachment and chapters (what the save has to carry over), and an MP4 with a regular and an SDH
+    track."""
+    out.mkdir(parents=True, exist_ok=True)
     run = _runner(tools)
+    av = out / "_av.mp4"
     run([tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "60", "-c:v", "libx264",
          "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(av)])
+    chap = out / "_chapters.txt"
+    chap.write_text(_CHAPTERS, encoding="utf-8")
+    font = out / "SubScrub Test.ttf"
+    font.write_bytes(bytes(range(256)) * 16)          # not a real font: the attachment only has to survive
     mkv = out / "Sample (SDH test).mkv"
     run([tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(av),
-         "-i", str(FIX / "plain_en.srt"), "-i", str(FIX / "sdh_en.srt"), "-i", str(FIX / "sdh_es.ass"),
-         "-map", "0", "-map", "1", "-map", "2", "-map", "3", "-c", "copy",
+         "-i", str(FIX / "plain_en.srt"), "-i", str(FIX / "sdh_en.srt"), "-i", str(FIX / "sdh_es.ass"), "-i", str(chap),
+         "-map", "0", "-map", "1", "-map", "2", "-map", "3", "-map_metadata", "4", "-map_chapters", "4", "-c", "copy",
          "-metadata:s:s:0", "language=eng", "-metadata:s:s:0", "title=English",
          "-metadata:s:s:1", "language=eng", "-metadata:s:s:1", "title=English SDH",
          "-metadata:s:s:2", "language=spa", "-metadata:s:s:2", "title=Español (SDH)",
          "-disposition:s:0", "0", "-disposition:s:1", "default+hearing_impaired", "-disposition:s:2", "0",
-         str(mkv)])
+         "-attach", str(font), "-metadata:s:t:0", "mimetype=font/ttf", str(mkv)])
     mp4 = out / "Sample (SDH test).mp4"
-    run([tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(av), "-i", str(FIX / "sdh_en.srt"),
-         "-map", "0", "-map", "1", "-c", "copy", "-c:s", "mov_text", "-metadata:s:s:0", "language=eng",
-         "-disposition:s:0", "default", str(mp4)])
-    av.unlink()
-    print(f"Made:\n  {mkv}\n  {mp4}")
+    run([tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(av), "-i", str(FIX / "plain_en.srt"),
+         "-i", str(FIX / "sdh_en.srt"), "-map", "0", "-map", "1", "-map", "2", "-c", "copy", "-c:s", "mov_text",
+         "-metadata:s:s:0", "language=eng", "-metadata:s:s:0", "handler_name=English",       # MP4 keeps names here
+         "-metadata:s:s:1", "language=eng", "-metadata:s:s:1", "handler_name=English SDH",
+         "-disposition:s:0", "0", "-disposition:s:1", "default", str(mp4)])
+    for f in (av, chap, font):
+        f.unlink()
+    return mkv, mp4
+
+
+# ============================================================================ edge cases
+
+def _tiny_video(run, tools, out: Path, subs: list[tuple[Path, str, str, str]], seconds: int = 20):
+    """A short black-frame MKV with subtitle tracks (file, language, title, disposition); none when `subs` is empty.
+
+    FFmpeg makes the picture and sound; the subtitle tracks go in with mkvmerge when it is there. On the Windows CI
+    runner (FFmpeg from Chocolatey) encoding the lavfi sources and muxing .srt inputs in one command stalled for
+    good, while the same command takes a fraction of a second with the Linux builds."""
+    if subs and tools.mkvmerge:
+        base = out.with_name(out.stem + "_base.mkv")
+        _tiny_video(run, tools, base, [], seconds)
+        cmd = [tools.mkvmerge, "-q", "-o", str(out), str(base)]
+        for f, lang, title, disp in subs:
+            flags = disp.split("+")
+            cmd += ["--language", f"0:{lang}", "--track-name", f"0:{title}", "--sub-charset", "0:UTF-8",
+                    "--default-track-flag", f"0:{int('default' in flags)}",
+                    "--hearing-impaired-flag", f"0:{int('hearing_impaired' in flags)}", str(f)]
+        run(cmd)
+        base.unlink()
+        return
+    cmd = [tools.ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+           f"color=c=black:s=160x90:r=1:d={seconds}", "-f", "lavfi", "-i", f"anullsrc=r=8000:cl=mono:d={seconds}"]
+    for f, *_ in subs:
+        cmd += ["-i", str(f)]
+    cmd += ["-map", "0:v", "-map", "1:a"] + [x for k in range(len(subs)) for x in ("-map", f"{k + 2}")]
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "8k", "-c:s", "srt"]
+    for k, (_, lang, title, disp) in enumerate(subs):
+        cmd += [f"-metadata:s:s:{k}", f"language={lang}", f"-metadata:s:s:{k}", f"title={title}",
+                f"-disposition:s:{k}", disp]
+    run(cmd + [str(out)])                        # both sources already stop after `seconds`
+
+
+def _cues(path: Path, texts: list[str], encoding: str = "utf-8"):
+    path.write_bytes("".join(f"{i}\n{_ts(2 * i)} --> {_ts(2 * i + 1.5)}\n{t}\n\n" for i, t in enumerate(texts, 1))
+                     .encode(encoding, errors="replace"))
+
+
+SDH_TEXTS = ["[door creaks]", "JOHN: Where were you?", "- Home.\n- [chuckles] Sure.", "(sighs) Fine.", "♪ tense music ♪",
+             "I told you not to come here.", "[phone buzzing]", "Café is closed."]
+
+
+def edge_cases(tools, out: Path) -> dict[str, Path]:
+    """Awkward inputs for tests.test_edge. Returns {case: path} (the video, or the folder for sidecar cases)."""
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    tmp = out / "_tmp"
+    tmp.mkdir()
+    run = _runner(tools)
+    cases: dict[str, Path] = {}
+    sdh, plain, empty = tmp / "sdh.srt", tmp / "plain.srt", tmp / "empty.srt"
+    _cues(sdh, SDH_TEXTS)
+    _cues(plain, [t for t in SDH_TEXTS if t[0] not in "[(♪" and ":" not in t[:6]])
+    empty.write_text("", encoding="utf-8")
+
+    def make(name: str, subs) -> Path:
+        d = out / name
+        d.mkdir()
+        p = d / f"{name}.mkv"
+        _tiny_video(run, tools, p, subs)
+        cases[name] = p
+        return p
+
+    make("no subtitles", [])
+    sdh2 = tmp / "sdh2.srt"                      # a separate file: the same one opened twice stalls FFmpeg on Windows
+    shutil.copy(sdh, sdh2)
+    make("two sdh", [(sdh, "eng", "English SDH", "default+hearing_impaired"),
+                     (sdh2, "eng", "English (HI)", "hearing_impaired")])
+    all_sdh = tmp / "all.srt"
+    _cues(all_sdh, ["[door creaks]", "(sighs)", "[phone buzzing]", "♪♪", "[music fades]"])
+    make("every line is sdh", [(all_sdh, "eng", "English SDH", "default+hearing_impaired")])
+    # a flagged SDH track with no cues in it: mkvmerge takes an empty .srt where FFmpeg refuses
+    if tools.mkvmerge:
+        base = tmp / "base.mkv"
+        _tiny_video(run, tools, base, [])
+        d = out / "empty sdh"
+        d.mkdir()
+        p = d / "empty sdh.mkv"
+        run([tools.mkvmerge, "-q", "-o", str(p), str(base), "--language", "0:eng", "--track-name", "0:English SDH",
+             "--hearing-impaired-flag", "0:1", "--default-track-flag", "0:1", str(empty)])
+        cases["empty sdh"] = p
+    # picture subtitles only: the codec id of a text track is rewritten to PGS (same length, so the file stays valid)
+    p = make("picture subtitles only", [(sdh, "eng", "English", "default")])
+    data = p.read_bytes()
+    if b"S_TEXT/UTF8" in data:
+        p.write_bytes(data.replace(b"S_TEXT/UTF8", b"S_HDMV/PGS\0"))
+    # a name with characters that trip up command lines, paths and XML
+    make("It's & 100% [Rock] Café 🎬", [(sdh, "eng", "English SDH", "default+hearing_impaired")])
+    # subtitle files next to a video: empty, UTF-16 and cp1252
+    for name, writer in (("zero byte sidecar", lambda f: f.write_bytes(b"")),
+                         ("utf-16 sidecar", lambda f: _cues(f, SDH_TEXTS, "utf-16")),
+                         ("cp1252 sidecar", lambda f: _cues(f, SDH_TEXTS, "cp1252"))):
+        d = out / name
+        d.mkdir()
+        v = d / f"{name}.mkv"
+        _tiny_video(run, tools, v, [])
+        writer(d / f"{name}.eng.sdh.srt")
+        cases[name] = v
+    shutil.rmtree(tmp)
+    return cases
 
 
 # ============================================================================ the library

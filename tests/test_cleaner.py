@@ -43,6 +43,25 @@ def test_dialogue_dashes():
     assert c("- One\n- Two", keep) == "- One\n- Two"
 
 
+def test_corpus():
+    """tests/fixtures/corpus.tsv: one tricky line (or a few neighbours) per row, with the expected result and whether it
+    must be marked "to check". Every bug found once gets a row so it can't come back."""
+    rows = [l.rstrip("\n") for l in (FIX / "corpus.tsv").read_text(encoding="utf-8").split("\n")
+            if l.strip() and not l.startswith("#")]
+    assert len(rows) >= 60, len(rows)
+    bad = []
+    for row in rows:
+        src, want, flag = row.split("\t")
+        cues = [c.replace("\\n", "\n") for c in src.split(" ‖ ")]
+        srt = "".join(f"{i}\n00:00:{i:02d},000 --> 00:00:{i:02d},500\n{c}\n\n" for i, c in enumerate(cues, 1))
+        res = clean_doc(sf.parse(srt, "srt"), O)
+        got = ["∅" if t is None else t.replace("\n", "\\n") for t in res.texts()]
+        expected = [src_ if w == "=" else w for src_, w in zip(src.split(" ‖ "), want.split(" ‖ "))]
+        if got != expected or bool(res.flagged()) != (flag == "check"):
+            bad.append((src, got, expected, flag, res.flagged()))
+    assert not bad, "\n".join(map(str, bad))
+
+
 def test_unicode_dialogue_dashes():
     for dash in "-–—‐‑−":
         assert c(f"{dash} Hi.") == "Hi.", dash

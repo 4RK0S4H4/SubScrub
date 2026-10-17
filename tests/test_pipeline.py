@@ -1,5 +1,6 @@
 """End-to-end pipeline test on real media (needs ffmpeg; mkvmerge optional).
 
+    python -m tests.test_pipeline                    # makes its own videos (tests.make_samples), what CI runs
     python -m tests.test_pipeline <folder with sample videos>
 """
 import os
@@ -30,10 +31,14 @@ def run_case(tools, video, pick, opts, label):
     return info, after, out
 
 
-def main(folder):
+def main(folder=None):
     tools = media.find_tools()
     print("tools:", tools)
     work = tempfile.mkdtemp()
+    if folder is None:
+        from tests import make_samples
+        folder = tempfile.mkdtemp(prefix="subscrub_samples_")
+        make_samples.pipeline_samples(tools, make_samples.Path(folder))
     for f in os.listdir(folder):
         if f.endswith((".mkv", ".mp4")):
             shutil.copy(os.path.join(folder, f), work)
@@ -44,6 +49,9 @@ def main(folder):
     mkv = os.path.join(work, "Test Movie (2024).mkv")
     mp4 = os.path.join(work, "Test Clip.mp4")
     sdh = lambda i: next(t for t in i.subs if t.sdh_flagged and t.language == "eng")
+    # the generated MKV carries what a save has to keep: a font attachment and chapters
+    src = media.probe(tools, mkv)
+    assert src.count("attachment") == 1 and src.chapters == 2, (src.count("attachment"), src.chapters)
 
     # 1. MKV via mkvmerge, new file, keep original
     before, after, out = run_case(tools, mkv, sdh, media.SaveOptions(mode="new", keep_original=True), "mkv/mkvmerge/new")
@@ -58,13 +66,15 @@ def main(folder):
     t2 = media.Tools(tools.ffmpeg, tools.ffprobe, None)
     before, after, out = run_case(t2, mkv, sdh, media.SaveOptions(mode="replace", keep_original=False), "mkv/ffmpeg/replace")
     assert out.path == mkv and len(after.subs) == len(before.subs)
+    assert after.chapters == 2, "chapters must survive"
     assert not any(s.title == "English SDH" for s in after.subs)
     assert after.count("attachment") == before.count("attachment"), "attachments (fonts) must survive"
     assert sum(s.default for s in after.subs) == 1
 
     # 3. MP4 (mov_text) via ffmpeg, new file
-    before, after, out = run_case(tools, mp4, lambda i: i.subs[0], media.SaveOptions(mode="new", keep_original=True), "mp4/ffmpeg/new")
-    assert len(after.subs) == 3 and after.subs[1].codec == "mov_text" and after.subs[1].default
+    before, after, out = run_case(tools, mp4, sdh, media.SaveOptions(mode="new", keep_original=True), "mp4/ffmpeg/new")
+    assert len(after.subs) == 3 and after.subs[2].codec == "mov_text" and after.subs[2].default
+    assert sum(t.default for t in after.subs) == 1 and after.chapters == before.chapters
 
     # 4. sidecar
     before, after, out = run_case(tools, mp4, lambda i: i.subs[0], media.SaveOptions(mode="sidecar"), "sidecar")
@@ -119,8 +129,32 @@ def main(folder):
     assert sum(s.default for s in after.subs) == 1
     print("--- defaults:", [(s.title, s.default) for s in after.subs])
     print("files:", sorted(os.listdir(work)))
+
+    # 9. the regular English track is cleaned and becomes the default; the SDH track stays (#20), on both tools
+    from subscrub import batch
+    for label, tl in (("mkvmerge", tools), ("ffmpeg", media.Tools(tools.ffmpeg, tools.ffprobe, None))):
+        if label == "mkvmerge" and not tools.mkvmerge:
+            continue
+        v = os.path.join(work, f"Policy {label}.mkv")
+        shutil.copy(orig if os.path.exists(orig) else os.path.join(folder, "Sample (SDH test).mkv"), v)   # untouched
+        it = batch.Item(path=v, kind="video")
+        it.info = media.probe(tl, v)
+        paths = media.extract_subs(tl, it.info, it.info.subs, tempfile.mkdtemp())
+        it.docs = {t.index: sf.load(paths[t.index], t.fmt) for t in it.info.subs if t.index in paths}
+        batch.measure(it)
+        it.sel = batch.pick_track(it, None)
+        tr = it.track()
+        assert tr.title == "English" and batch.plain_pick(it, tr), (label, tr)
+        res = batch.clean_item(it, CleanOptions())
+        out = media.save(tl, it.info, tr, res.render(), res.doc.fmt,
+                         media.SaveOptions(mode="replace", keep_original=False))
+        after = media.probe(tl, v)
+        titles = [(s.title, s.default) for s in after.subs]
+        assert titles == [("English", True), ("English SDH", False), ("Español (SDH)", False)], (label, titles)
+        assert after.count("attachment") == 1 and after.chapters == 2, label
+        print(f"--- plain track wins ({label}):", titles)
     print("pipeline OK")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1] if len(sys.argv) > 1 else None)
