@@ -34,6 +34,9 @@ a future maintainer needs.
   a dozen drafts on HTML pages and a design canvas, picked "Struck Tag" and asked for a rounded square in the old
   icon's colours. `logo_pixmap` is the single source: `tools/make_icon.py` renders every .ico size from it, with a
   bolder version at 24 px and below rather than a scaled-down 256.
+- **After v3.0.0:** the README images showed as broken. The `screenshots/` rule in `.gitignore` (meant for local
+  visual-check shots) also matched `docs/screenshots/`, so the pictures were never committed. It now has an
+  exception, and the pictures were remade from the sample library.
 
 ## Testing approach
 
