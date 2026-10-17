@@ -280,7 +280,8 @@ class AboutDialog(GlassDialog):
             self.update_status.setText(f"You're up to date. {__version__} is the newest version.")
         else:
             self.update_status.setText(f"SubScrub {result.version} is available.")
-            self.update_btn.setText("Update")
+            from .. import updates
+            self.update_btn.setText("Update" if result.can_install and updates.is_installed() else "Download")
             self.update_btn.clicked.disconnect()
             self.update_btn.clicked.connect(lambda: (self.accept(), self.win.install_update()))
 

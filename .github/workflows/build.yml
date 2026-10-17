@@ -55,6 +55,7 @@ jobs:
           python -m tests.test_naming
           python -m tests.test_swap
           python -m tests.test_library
+          python -m tests.test_updates
           python -m tests.test_ui
           python -m tests.test_pipeline
           python -m tests.test_edge
@@ -72,10 +73,47 @@ jobs:
           if ($p.HasExited) { throw "SubScrub.exe exited straight away (code $($p.ExitCode))" }
           Stop-Process -Id $p.Id -Force
 
+      - name: Build the installer (SubScrub-Setup.exe)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $v = (python -c "import subscrub; print(subscrub.__version__)").Trim()
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\SubScrub.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path dist\SubScrub-Setup.exe)) { throw "dist\SubScrub-Setup.exe was not made" }
+
+      # install quietly like the in-app updater does, check it, start it, install over the top, uninstall
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "SubScrubInstalled"
+          $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir", "/LOG=$env:RUNNER_TEMP\setup.log")
+          $p = Start-Process dist\SubScrub-Setup.exe -ArgumentList $setupArgs -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw "installer exit code $($p.ExitCode)" }
+          foreach ($f in 'SubScrub.exe', 'unins000.exe') { if (-not (Test-Path "$dir\$f")) { throw "$f was not installed" } }
+          $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\SubScrub.lnk"
+          if (-not (Test-Path $lnk)) { throw "no Start-menu shortcut" }
+          Start-Sleep -Seconds 8                    # a quiet install starts the app by itself
+          $run = @(Get-Process SubScrub -ErrorAction SilentlyContinue)
+          if ($run.Count -eq 0) { throw "the installed SubScrub did not start" }
+          $run | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $p = Start-Process dist\SubScrub-Setup.exe -ArgumentList $setupArgs -Wait -PassThru     # an upgrade over the top
+          if ($p.ExitCode -ne 0) { throw "second install exit code $($p.ExitCode)" }
+          Start-Sleep -Seconds 5
+          Get-Process SubScrub -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\SubScrub.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\SubScrub.exe") { throw "the uninstaller left SubScrub.exe behind" }
+          if (Test-Path $lnk) { throw "the uninstaller left the Start-menu shortcut" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: SubScrub-exe
-          path: dist/SubScrub.exe
+          path: |
+            dist/SubScrub.exe
+            dist/SubScrub-Setup.exe
 
       - name: Check the version matches before releasing
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
@@ -91,7 +129,9 @@ jobs:
         with:
           tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          files: dist/SubScrub.exe
+          files: |
+            dist/SubScrub.exe
+            dist/SubScrub-Setup.exe
           generate_release_notes: true
 
   # the same tests on Linux: fast, and a second opinion on paths and encodings
@@ -125,6 +165,7 @@ jobs:
           python -m tests.test_naming
           python -m tests.test_swap
           python -m tests.test_library
+          python -m tests.test_updates
           python -m tests.test_ui
           python -m tests.test_pipeline
           python -m tests.test_edge

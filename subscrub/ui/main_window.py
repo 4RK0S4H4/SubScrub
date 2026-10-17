@@ -331,7 +331,7 @@ class MainWindow(QMainWindow):
         inner.setMaximumWidth(1120)
         il = QVBoxLayout(inner)
         il.setContentsMargins(0, 0, 0, 0)
-        self.update_banner = Banner("", "Update", self.install_update, tone="info")
+        self.update_banner = Banner("", "Update", self.install_update, tone="quiet")   # news, not a warning
         self.update_banner.layout().addWidget(button("Later", "subtle", "sm", self._update_later), 0, Qt.AlignVCenter)
         il.addWidget(self.update_banner)
         lay.addStretch(1)
@@ -661,6 +661,7 @@ class MainWindow(QMainWindow):
         v.addWidget(pp, 1)
         self.key_hints = KeyHints([(["J", "K"], "Next or previous line"), (["O"], "Keep original"),
                                    (["F3"], "Next change"), (["Ctrl", "Z"], "Undo a line")])
+        v.addSpacing(2)
         v.addWidget(self.key_hints)
         body.addWidget(main, 1)
         return page
@@ -2135,6 +2136,7 @@ class MainWindow(QMainWindow):
 
     def _fit_toolbar(self):
         """On a narrow window the line button shows just its icon, so the filter is never cut off."""
+        self.key_hints.setVisible(self.height() >= 760)       # a small window keeps the room for the list
         need = (self.filter.sizeHint().width() + 132 + self.prev_btn.width() * 2 + 78 + 4 + 14 * 3 + 90)
         compact = self.review_main.width() < need
         if compact == self._undo_compact:

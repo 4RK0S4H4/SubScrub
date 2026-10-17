@@ -225,6 +225,15 @@ d = dialogs.MessageDialog(w, "Rewrite 4 files in place?",
 shot_dialog(d, "12-confirm-dialog")
 shot_dialog(dialogs.ToolsDialog(w), "13-tools-dialog")
 shot_dialog(dialogs.AboutDialog(w), "14-about-dialog")
+from subscrub import updates  # noqa: E402
+w._show_update(updates.Update("2.9.0", "https://example.test", "https://example.test/SubScrub-Setup.exe", 1))
+w.show_files()
+pump(0.3)
+shot(w, "21-update-banner")
+ab = dialogs.AboutDialog(w)
+ab._update_result(updates.Update("2.9.0", "https://example.test", "https://example.test/SubScrub-Setup.exe", 1))
+shot_dialog(ab, "22-about-update-found")
+w.update_wrap.hide()
 shot_dialog(dialogs.LogDialog("\n".join(w.log_lines), w), "15-activity-log")
 
 if SAVE:

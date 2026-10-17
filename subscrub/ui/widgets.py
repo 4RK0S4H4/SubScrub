@@ -909,7 +909,7 @@ class Banner(QWidget):
         t = T()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        bg = {"warn": t["warn_bg"], "bad": t["bad_bg"]}.get(self.tone, t["accent_soft"])
+        bg = {"warn": t["warn_bg"], "bad": t["bad_bg"], "quiet": t["mute_bg"]}.get(self.tone, t["accent_soft"])
         p.setPen(Qt.NoPen)
         p.setBrush(qc(bg))
         p.drawRoundedRect(QRectF(self.rect()), 10, 10)
