@@ -19,29 +19,22 @@ is as before: clean it and drop the original SDH track per the save default. A t
 wins. The "to check" grading runs without the SDH cross-check in the regular-track case. Code: `batch.pick_track`,
 `batch.plain_pick`, `media.save`. "Keep the SDH Track Too" only matters when an SDH track is the one cleaned.
 
-## Next up: install and update (the user's stated priority)
+## Install and update (built in batch 3, not yet released)
 
-Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Python and builds the exe) and runs
-`install-tools.bat` for FFmpeg and MKVToolNix. The goal is one normal installer and in-app updates.
-
-1. **Releases from CI.** `.github/workflows/build.yml` already builds `SubScrub.exe` on Windows and attaches it to a
-   GitHub Release when a `vX.Y.Z` tag is pushed. Make the first release (`v2.7.3`) and confirm the exe runs on the
-   user's PC.
-2. **A real installer.** Suggested: Inno Setup, built in CI (`choco install innosetup`, then `iscc`). It installs
-   to `%LOCALAPPDATA%\Programs\SubScrub` with no admin prompt, adds Start-menu and desktop shortcuts and an
-   uninstaller, and keeps settings (QSettings, registry) and `%LOCALAPPDATA%\SubScrub` on upgrade.
-   **(ask)** Whether the installer should also install FFmpeg and MKVToolNix (via winget) or leave that to the
-   app's existing "install tools" buttons.
-3. **Update check in the app.** On start (at most once a day) and from ⋯ → "Check for updates", call
-   `https://api.github.com/repos/<owner>/<repo>/releases/latest`, compare with `__version__`, and show a quiet
-   banner: "SubScrub 2.8.0 is available — Update". Update = download the new installer to a temp folder, run it
-   silently (`/VERYSILENT /SUPPRESSMSGBOXES`) and quit. Never update mid-save. **(ask)** Automatic download or ask
-   first (recommended: ask first, one click).
-4. **SmartScreen.** An unsigned exe shows "Windows protected your PC" on first run. Code signing costs money.
-   **(ask)** Whether that's worth it, or whether the user is fine clicking "Run anyway" once per version.
-   Remove the "Unblock the zip" step from the README once there's an installer.
-5. Replace README's Setup section with "Download SubScrub-Setup.exe from Releases", and keep `build.bat` for
-   developers only.
+- **Installer** `installer/SubScrub.iss` (Inno Setup, built in CI as `dist/SubScrub-Setup.exe` and attached to the
+  Release): per-user, no admin prompt, installs to `%LOCALAPPDATA%\Programs\SubScrub`, Start-menu and desktop
+  shortcuts, uninstaller, quiet mode (`/VERYSILENT /SUPPRESSMSGBOXES`) that starts the app again afterwards. It never
+  touches settings (registry) or `%LOCALAPPDATA%\SubScrub`. It does not install FFmpeg or MKVToolNix (the app's
+  buttons do). CI installs it quietly on the runner, starts it, installs over the top and uninstalls.
+- **Update check** `subscrub/updates.py`: once a day at start (Settings → Appearance and Safety can switch it off), and
+  from ⋯ → Check for Updates and the About screen. A quiet banner "SubScrub X is available" with Update and Later.
+  Update downloads the installer, checks its size and SHA-256, runs it quietly and quits; never during a save.
+  A copy that wasn't installed by the installer (a loose exe, source) opens the Releases page instead. "Later"
+  remembers that version, so the automatic check stays quiet about it; a manual check always shows it.
+- **SmartScreen**: unsigned, so Windows says "Windows protected your PC" on first run. The user clicks "Run anyway".
+  (Decided 2026-10-11: no code signing.)
+- Needs a real Windows PC to confirm: the installer's look, the in-app update from a real Release (first possible
+  after two releases have the installer), and the SmartScreen prompt.
 
 ## Tests and CI
 
@@ -57,8 +50,8 @@ Today the user downloads a zip, unblocks it, runs `build.bat` (which sets up Pyt
 
 ## Ideas the user has mentioned (not started)
 
-- Keyboard shortcuts in Review (J/K to move between lines, a key for "Keep original"), shown as keycaps.
-- The update check in About (the About screen with version and credits exists since 2.8.0).
+- Done in batch 3: Review shortcuts (J/K move between lines, O keeps the original, F3 next change), shown as keycaps
+  under the line list (hidden in a small window); the update check in About.
 - **(ask)** An optional local AI check for edge cases. The user has an RTX 4070. The earlier recommendation was a
   narrow, opt-in feature that only suggests fixes for lines already marked "to check", run by a small local model,
   never auto-applied. The user wasn't sure it's worth it.

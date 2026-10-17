@@ -55,6 +55,7 @@ python -m tests.test_batch
 python -m tests.test_naming
 python -m tests.test_swap
 python -m tests.test_library
+python -m tests.test_updates                                      # update check and download, no network
 python -m tests.test_ui                                         # contrast (WCAG AA), main flows, every dialog
 python -m tests.test_pipeline                                    # makes its own sample videos (ffmpeg + mkvmerge)
 python -m tests.test_edge                                        # awkward files through the real save path

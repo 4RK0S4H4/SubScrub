@@ -733,6 +733,15 @@ class PreviewPanel(QWidget):
         k = bisect.bisect_right(ch, cur)
         return (k if k and ch[k - 1] == cur else 0), len(ch)
 
+    def move(self, delta: int):
+        """The line above or below the selected one (J / K); the first line when nothing is selected."""
+        if not self.rows:
+            return
+        cur = self.list.currentIndex().row()
+        nxt = 0 if cur < 0 else max(0, min(len(self.rows) - 1, cur + delta))
+        if nxt != cur:
+            self._select(nxt)
+
     def step(self, direction: int):
         ch = self.changed_rows()
         if not ch:

@@ -909,7 +909,7 @@ class Banner(QWidget):
         t = T()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        bg = {"warn": t["warn_bg"], "bad": t["bad_bg"]}.get(self.tone, t["accent_soft"])
+        bg = {"warn": t["warn_bg"], "bad": t["bad_bg"], "quiet": t["mute_bg"]}.get(self.tone, t["accent_soft"])
         p.setPen(Qt.NoPen)
         p.setBrush(qc(bg))
         p.drawRoundedRect(QRectF(self.rect()), 10, 10)
@@ -1163,6 +1163,67 @@ class FileRow(QWidget):
 
 
 # ============================================================================ legend
+
+class KeyHints(QWidget):
+    """A quiet line of keyboard shortcuts: each is one or more keycaps and what they do. Keys that are alternatives
+    for one action are written together ("J" "K"), and the text says what they do."""
+
+    def __init__(self, hints: list[tuple[list[str], str]], parent=None):
+        super().__init__(parent)
+        self.hints = hints
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedHeight(26)
+
+    def _fonts(self):
+        text = theme.font(12)
+        key = QFont(theme.font(11, 600))
+        return text, key
+
+    def _layout(self) -> list:
+        """[(kind, text, x, width)] for everything that fits."""
+        text_f, key_f = self._fonts()
+        tm, km = QFontMetrics(text_f), QFontMetrics(key_f)
+        out, x = [], 0
+        for keys, what in self.hints:
+            w = sum(max(20, km.horizontalAdvance(k) + 12) + 4 for k in keys) + 4 + tm.horizontalAdvance(what)
+            if x + w > self.width() and out:
+                break
+            for k in keys:
+                kw = max(20, km.horizontalAdvance(k) + 12)
+                out.append(("key", k, x, kw))
+                x += kw + 4
+            x += 4
+            tw = tm.horizontalAdvance(what)
+            out.append(("text", what, x, tw))
+            x += tw + 18
+        return out
+
+    def sizeHint(self):
+        return QSize(self.width() or 400, 26)
+
+    def paintEvent(self, _):
+        t = T()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        text_f, key_f = self._fonts()
+        h = self.height()
+        for kind, text, x, w in self._layout():
+            if kind == "text":
+                p.setFont(text_f)
+                p.setPen(qc(t["text3"]))
+                p.drawText(QRectF(x, 0, w + 2, h), Qt.AlignVCenter | Qt.AlignLeft, text)
+                continue
+            r = QRectF(x, (h - 20) / 2, w, 20)
+            p.setPen(Qt.NoPen)
+            p.setBrush(qc(t["border2"]))                       # the key's lower edge
+            p.drawRoundedRect(r.translated(0, 1.5), 5, 5)
+            p.setBrush(qc(t["pop_bg"] if t["is_dark"] else "#ffffff"))
+            p.setPen(QPen(qc(t["border2"]), 1))
+            p.drawRoundedRect(r, 5, 5)
+            p.setFont(key_f)
+            p.setPen(qc(t["text2"]))
+            p.drawText(r, Qt.AlignCenter, text)
+
 
 class Legend(QWidget):
     """Line counts, each with a swatch in the colour those lines have on the timeline."""

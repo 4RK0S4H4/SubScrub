@@ -7,3 +7,6 @@ if _os.environ.get("SUBSCRUB_TEST_TIMEOUT"):
     import faulthandler as _fh
 
     _fh.dump_traceback_later(int(_os.environ["SUBSCRUB_TEST_TIMEOUT"]), exit=True)
+
+# no test window should ask GitHub about updates
+_os.environ.setdefault("SUBSCRUB_NO_UPDATE_CHECK", "1")
