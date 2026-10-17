@@ -1,0 +1,2 @@
+# Test fixtures keep LF endings on every OS (the cleaner preserves whatever line endings a file has)
+tests/fixtures/* text eol=lf
