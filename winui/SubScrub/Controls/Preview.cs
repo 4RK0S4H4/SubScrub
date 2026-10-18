@@ -337,7 +337,7 @@ public sealed partial class CueRowView : UserControl
         _time.Text = c.Time;
         _time.Foreground = Theme.Brush("S4Text3", this);
         _line.Fill = Theme.Brush("S4Border", this);
-        RichText.Fill(_before, c.Before, Theme.Brush("S4Removed", this));
+        RichText.Fill(_before, c.Before, Theme.Brush("S4Removed", this), Theme.Brush("S4RemovedBg", this));
         _before.Foreground = Theme.Brush(kept ? "S4Text3" : "S4Text2", this);
         if (c.After == null)
         {

@@ -62,6 +62,7 @@ public sealed partial class StateBadge : UserControl
         _text.Foreground = Theme.Brush(fg, this);
         _icon.Foreground = Theme.Brush(fg, this);
         _icon.Glyph = glyph;
+        _icon.Visibility = _kind == "flag" ? Visibility.Collapsed : Visibility.Visible;   // "Recommended" isn't a warning
     }
 }
 
@@ -216,7 +217,7 @@ public sealed partial class RuleRow : UserControl
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = title, Style = Theme.Style("S4Medium"), FontSize = 13.5 });
-        text.Children.Add(new TextBlock { Text = example, Style = Theme.Style("S4Hint"), FontSize = 12, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+        text.Children.Add(new TextBlock { Text = example, Style = Theme.Style("S4Hint"), FontSize = 12, TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.None });
         grid.Children.Add(text);
         _count = new TextBlock { Style = Theme.Style("S4Count"), FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(_count, 1);
@@ -284,9 +285,13 @@ public sealed partial class ChoiceButton : Button
 /// <summary>Builds the before column of a preview row: kept text as is, removed parts struck through.</summary>
 internal static class RichText
 {
-    public static void Fill(TextBlock block, IEnumerable<Segment> segments, Brush gone)
+    /// <summary>gone: the struck-out text; tint: a soft fill behind it (a struck "- " alone reads as a dash).</summary>
+    public static void Fill(TextBlock block, IEnumerable<Segment> segments, Brush gone, Brush tint)
     {
         block.Inlines.Clear();
+        block.TextHighlighters.Clear();
+        var highlight = new TextHighlighter { Background = tint, Foreground = gone };
+        var at = 0;
         foreach (var s in segments)
         {
             var run = new Run { Text = s.Text };
@@ -294,8 +299,12 @@ internal static class RichText
             {
                 run.TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough;
                 run.Foreground = gone;
+                highlight.Ranges.Add(new TextRange { StartIndex = at, Length = s.Text.Length });
             }
             block.Inlines.Add(run);
+            at += s.Text.Length;
         }
+        if (highlight.Ranges.Count > 0)
+            block.TextHighlighters.Add(highlight);
     }
 }
