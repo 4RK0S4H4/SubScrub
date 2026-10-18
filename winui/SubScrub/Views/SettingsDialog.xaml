@@ -1,0 +1,44 @@
+<!-- Settings: a native ContentDialog (Windows dims the window and animates it in), drawn as an S4 glass dialog. -->
+<ContentDialog
+    x:Class="SubScrub.Views.SettingsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:c="using:SubScrub.Controls"
+    Style="{StaticResource S4Dialog}">
+
+    <Grid x:Name="DialogFrame" Width="900" Height="600">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Padding="24,16,14,14">
+            <TextBlock Text="Settings" Style="{StaticResource S4CardTitle}" FontSize="18" VerticalAlignment="Center" />
+            <Button Style="{StaticResource S4IconButton}" HorizontalAlignment="Right" Click="OnCancel"
+                    ToolTipService.ToolTip="Close" AutomationProperties.Name="Close">
+                <c:SolarIcon Glyph="close" Size="16" />
+            </Button>
+        </Grid>
+
+        <Grid Grid.Row="1" BorderBrush="{ThemeResource S4BorderBrush}" BorderThickness="0,1,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="244" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel x:Name="Nav" Padding="12" Spacing="6"
+                        BorderBrush="{ThemeResource S4BorderBrush}" BorderThickness="0,0,1,0" />
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                <Grid x:Name="PageHost" Padding="24,18,28,24" />
+            </ScrollViewer>
+        </Grid>
+
+        <Grid Grid.Row="2" Padding="16,14,20,16">
+            <Button Content="Restore Defaults" Style="{StaticResource S4SubtleButton}" Click="OnRestore" />
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button Content="Cancel" Style="{StaticResource S4Button}" Click="OnCancel" />
+                <Button Content="Save" Style="{StaticResource S4PrimaryButton}" Click="OnSave" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</ContentDialog>

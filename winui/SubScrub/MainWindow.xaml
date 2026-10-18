@@ -1,0 +1,184 @@
+<!--
+    The window: Mica behind everything (Windows 11), then the S4 page (dark: a 165° gradient with two faint accent
+    blooms), a top bar that doubles as the title bar, the Files and Review screens, and a footer bar with the status
+    and the one primary button.
+-->
+<Window
+    x:Class="SubScrub.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:c="using:SubScrub.Controls"
+    Title="SubScrub">
+
+    <UserControl x:Name="Root" FontFamily="{StaticResource S4FontRegular}" FontSize="14"
+                 Foreground="{ThemeResource S4TextBrush}" IsTabStop="False">
+        <Grid x:Name="Shell">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- the page over the backdrop -->
+            <Rectangle x:Name="PageLayer" Grid.RowSpan="3" Fill="{ThemeResource S4PageBrush}" />
+            <Rectangle x:Name="Bloom0Layer" Grid.RowSpan="3" IsHitTestVisible="False">
+                <Rectangle.Fill>
+                    <RadialGradientBrush x:Name="Bloom0" MappingMode="Absolute">
+                        <GradientStop Offset="0" Color="{ThemeResource S4Bloom0Color}" />
+                        <GradientStop Offset="0.6" Color="{ThemeResource S4Bloom0EdgeColor}" />
+                    </RadialGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
+            <Rectangle x:Name="Bloom1Layer" Grid.RowSpan="3" IsHitTestVisible="False">
+                <Rectangle.Fill>
+                    <RadialGradientBrush x:Name="Bloom1" MappingMode="Absolute">
+                        <GradientStop Offset="0" Color="{ThemeResource S4Bloom1Color}" />
+                        <GradientStop Offset="0.6" Color="{ThemeResource S4Bloom1EdgeColor}" />
+                    </RadialGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
+
+            <!-- ============================================================ top bar (also the title bar) -->
+            <Grid x:Name="TopBar" Grid.Row="0" Background="{ThemeResource S4BarBgBrush}"
+                  BorderBrush="{ThemeResource S4BorderBrush}" BorderThickness="0,0,0,1" Padding="16,0,8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Image Source="ms-appx:///Assets/subscrub.png" Width="24" Height="24" />
+                    <TextBlock Text="SubScrub" Style="{StaticResource S4Text}" FontFamily="{StaticResource S4FontSemiBold}"
+                               FontSize="15" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Border x:Name="Tabs" Grid.Column="1" Margin="22,0,0,0" Style="{StaticResource S4SegTrack}"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="FilesTab" GroupName="Tabs" IsChecked="True" Style="{StaticResource S4SegItem}"
+                                     Checked="OnTabChecked" AutomationProperties.Name="Files">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="Files" />
+                                <TextBlock x:Name="FilesCount" Typography.NumeralAlignment="Tabular" Opacity="0.85" />
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton x:Name="ReviewTab" GroupName="Tabs" Content="Review" Style="{StaticResource S4SegItem}"
+                                     Checked="OnTabChecked" />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel x:Name="RightActions" Grid.Column="3" Orientation="Horizontal" Spacing="2"
+                            VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,0" VerticalAlignment="Center"
+                                ToolTipService.ToolTip="FFmpeg and MKVToolNix found (sample data in this preview)">
+                        <c:SolarIcon Glyph="check-read" Size="16" VerticalAlignment="Center"
+                                     Foreground="{ThemeResource S4Text2Brush}" />
+                        <TextBlock Text="Tools Ready" Style="{StaticResource S4Quiet}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Button x:Name="ThemeButton" Style="{StaticResource S4IconButton}" Click="OnThemeClick">
+                        <c:SolarIcon x:Name="ThemeIcon" Glyph="sun" Size="18" />
+                    </Button>
+                    <Button x:Name="SettingsButton" Style="{StaticResource S4IconButton}" Click="OnSettingsClick"
+                            ToolTipService.ToolTip="Settings" AutomationProperties.Name="Settings">
+                        <c:SolarIcon Glyph="settings" Size="18" />
+                    </Button>
+                    <Button x:Name="MoreButton" Style="{StaticResource S4IconButton}"
+                            ToolTipService.ToolTip="More" AutomationProperties.Name="More">
+                        <c:SolarIcon Glyph="menu-dots" Size="18" />
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuFlyoutItem Text="Tools and Paths" />
+                                <MenuFlyoutItem Text="Activity Log" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="About SubScrub" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- ============================================================ Files -->
+            <ScrollViewer x:Name="FilesPage" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <Grid MaxWidth="1160" Padding="40,28,40,32" RowSpacing="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Files" Style="{StaticResource S4PageTitle}" />
+                            <TextBlock x:Name="FilesSummary" Style="{StaticResource S4Quiet}" />
+                            <TextBlock x:Name="FilesSubSummary" Style="{StaticResource S4Quiet}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button Content="Clear List" Style="{StaticResource S4SubtleButton}" />
+                            <Button Style="{StaticResource S4Button}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <c:SolarIcon Glyph="document-add" Size="18" VerticalAlignment="Center" />
+                                    <TextBlock Text="Add Files" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource S4Button}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <c:SolarIcon Glyph="add-folder" Size="18" VerticalAlignment="Center" />
+                                    <TextBlock Text="Add Folder" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1" Style="{StaticResource S4Card}" Padding="14,2,10,2">
+                        <StackPanel x:Name="FileList" />
+                    </Border>
+
+                    <Grid Grid.Row="2" ColumnSpacing="24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource S4Hint}"
+                                   Text="Saving replaces each original, which goes to the Recycle Bin once the new file checks out. The cleaned track becomes the default. Files with a regular English track clean that one and keep the SDH track; otherwise the SDH track is dropped. Matching .srt files go into their video and are then removed." />
+                        <Button Grid.Column="1" Content="Change" Style="{StaticResource S4SubtleButton}" Height="30"
+                                VerticalAlignment="Top" FontSize="13" Click="OnSettingsClick" />
+                    </Grid>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ============================================================ Review (Stage 1: nothing to review yet) -->
+            <Grid x:Name="ReviewPage" Grid.Row="1" Visibility="Collapsed" Padding="40">
+                <Border Style="{StaticResource S4Card}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Padding="40,32" MaxWidth="460">
+                    <StackPanel Spacing="10" HorizontalAlignment="Center">
+                        <c:SolarIcon Glyph="subtitles" Duo="True" Size="40" HorizontalAlignment="Center"
+                                     Foreground="{ThemeResource S4Text2Brush}" />
+                        <TextBlock Text="Nothing to review yet" Style="{StaticResource S4CardTitle}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Style="{StaticResource S4Hint}" TextAlignment="Center"
+                                   Text="Pick a file in Files and click Review to check its lines before saving." />
+                        <Button Content="Go to Files" Style="{StaticResource S4Button}" HorizontalAlignment="Center"
+                                Margin="0,8,0,0" Click="OnGoToFiles" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ============================================================ footer -->
+            <Grid x:Name="Footer" Grid.Row="2" Background="{ThemeResource S4BarBgBrush}"
+                  BorderBrush="{ThemeResource S4BorderBrush}" BorderThickness="0,1,0,0" Padding="24,12,20,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Style="{StaticResource S4Quiet}" VerticalAlignment="Center" />
+                <Button x:Name="PrimaryButton" Grid.Column="1" Style="{StaticResource S4PrimaryButton}" />
+            </Grid>
+        </Grid>
+    </UserControl>
+</Window>
