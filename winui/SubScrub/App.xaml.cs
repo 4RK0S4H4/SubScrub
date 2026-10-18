@@ -15,6 +15,18 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (Shots.Dir != null)
+        {
+            Directory.CreateDirectory(Shots.Dir);
+            try
+            {
+                Diagnose.Run(Shots.Dir);
+            }
+            catch (Exception e)
+            {
+                File.AppendAllText(Path.Combine(Shots.Dir, "diagnose.txt"), "diagnose failed: " + e + "\n");
+            }
+        }
         _window = new MainWindow();
         _window.Activate();
     }

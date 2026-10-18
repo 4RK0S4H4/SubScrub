@@ -154,6 +154,7 @@ jobs:
             $p = Start-Process winui-out\SubScrub.exe -ArgumentList "--shots", "`"$dir`"", "--theme", $t, "--size", "1920x1080" -PassThru
             $null = $p.Handle
             if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "screenshot run ($t) did not finish" }
+            if (Test-Path "$dir\diagnose.txt") { Write-Host "--- XAML check ($t)"; Get-Content "$dir\diagnose.txt"; Remove-Item "$dir\diagnose.txt" }
             if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt"; throw "SubScrub crashed ($t)" }
           }
           Get-ChildItem $dir | Format-Table Name, Length

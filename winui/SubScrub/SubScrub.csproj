@@ -25,6 +25,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- a copy of every page for the screenshot mode's XAML check (Services/Diagnose.cs) -->
+    <EmbeddedResource Include="**\*.xaml" Exclude="bin\**;obj\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
     <Content Include="Assets\Fonts\*.ttf" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\fonts\OFL-Inter.txt" Link="Assets\Fonts\OFL-Inter.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\subscrub.ico" Link="Assets\subscrub.ico" CopyToOutputDirectory="PreserveNewest" />
