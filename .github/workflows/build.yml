@@ -136,7 +136,12 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Build (unpackaged, self-contained)
-        run: dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
+        shell: pwsh
+        run: |
+          dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          if (-not (Get-ChildItem winui-out\*.pri)) { throw "no .pri file in the output: the XAML could not load" }
+          Get-ChildItem winui-out\*.pri, winui-out\SubScrub.exe | Format-Table Name, Length
 
       # the runner's screen is small; try for 1920x1080 so the on-screen shots aren't cramped
       - name: Screen size
