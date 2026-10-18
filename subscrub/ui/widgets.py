@@ -1645,7 +1645,8 @@ class Bar(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
-        p.fillRect(r, qc(t["bar_bg"]))
+        if not (self.edge == "bottom" and getattr(self.window(), "sysglass", False)):
+            p.fillRect(r, qc(t["bar_bg"]))      # with Mica on, the top bar stays clear so it matches the title bar
         p.setPen(QPen(qc(t["border"]), 1))
         y = r.bottom() - 0.5 if self.edge == "bottom" else r.top() + 0.5
         p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
