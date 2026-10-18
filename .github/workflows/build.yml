@@ -179,3 +179,18 @@ jobs:
           name: winui-screenshots
           path: winui-shots/
           if-no-files-found: warn
+
+      # artifact downloads are blocked from cloud Claude sessions, so the same images also go to a throwaway branch
+      # (sample data only; force-pushed each run, never merged)
+      - name: Publish the screenshots to the winui-screenshots branch
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        run: |
+          [ -d winui-shots ] || exit 0
+          cd winui-shots
+          git init -q -b winui-screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "WinUI screenshots for ${{ github.event.pull_request.head.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" winui-screenshots
