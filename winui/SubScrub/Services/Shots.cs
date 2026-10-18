@@ -6,22 +6,27 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Foundation;
+using SubScrub.Models;
 using Windows.Graphics.Imaging;
 
 namespace SubScrub.Services;
 
-/// <summary>Screenshot mode for CI and the visual check (sample data only, nothing on disk is touched):
+/// <summary>The scripted QA run for CI and the visual check. Drives the real app end to end on a copy of the sample
+/// library (tests/make_samples.py --library), with a throwaway settings file and a stand-in for TMDB:
 ///
-///     SubScrub.exe --shots &lt;folder&gt; --theme dark|light [--size 1920x1080] [--no-mica]
+///     SubScrub.exe --shots &lt;folder&gt; --library &lt;videos&gt; --theme dark|light [--size 1920x1080] [--no-mica]
 ///
-/// For every screen it saves two images: "01-files-dark.png" is the window's XAML drawn by WinUI itself (exact
-/// pixels at any screen size, with the S4 page where Mica would be), and "screen-01-files-dark.png" is what is on
-/// the screen (real Mica, title bar and acrylic, when the machine has them). It also times how long Settings takes
-/// to open (timings-dark.txt), then quits.</summary>
+/// Adds the videos, opens Review (to check, changes, a kept line, look closer, regular subtitles only), picks a
+/// title, opens Settings, then saves everything, answering the questions the way a person would. Every screen is
+/// saved twice: "02-files-dark.png" is the window's XAML drawn by WinUI itself (exact pixels, the S4 page where
+/// Mica would be) and "screen-02-files-dark.png" is a capture of the real screen. It also writes qa-dark.json (what
+/// was saved, the final rows, timings) for tools/winui_qa_check.py to verify with ffprobe and mkvmerge, then quits.
+/// Without --library it only shows the welcome screen and Settings.</summary>
 internal static partial class Shots
 {
     public static string? Dir { get; }
     public static string? Theme { get; }
+    public static string? Library { get; }
     public static (int W, int H)? Size { get; }
     public static bool NoMica { get; }
 
@@ -35,6 +40,7 @@ internal static partial class Shots
             {
                 case "--shots": Dir = Path.GetFullPath(next); i++; break;
                 case "--theme": Theme = next; i++; break;
+                case "--library": Library = Path.GetFullPath(next); i++; break;
                 case "--no-mica": NoMica = true; break;
                 case "--size":
                     var wh = next.Split('x');
@@ -45,6 +51,8 @@ internal static partial class Shots
             }
         }
     }
+
+    private static string Tag => Size is { } s && s != (1920, 1080) ? $"-{s.W}x{s.H}" : "";
 
     public static void Crash(Exception e)
     {
@@ -63,52 +71,196 @@ internal static partial class Shots
             Environment.Exit(1);
     }
 
+    private static readonly List<string> Timings = [];
+    private static readonly List<string> Problems = [];
+
+    private static void Note(string line) => Timings.Add(line);
+
     public static async Task RunAsync(MainWindow win)
     {
-        var t = Theme ?? (win.IsDark ? "dark" : "light");
-        var log = new List<string>();
+        var t = (Theme ?? (win.IsDark ? "dark" : "light")) + Tag;
         try
         {
             Directory.CreateDirectory(Dir!);
-            await Task.Delay(1500);                                  // fonts, Mica and first layout settle
-            await Save(win, $"01-files-{t}");
-
-            win.ShowTab(review: true);
-            await Task.Delay(600);
-            await Save(win, $"02-review-{t}");
-            win.ShowTab(review: false);
-            await Task.Delay(400);
-
-            // Settings: the first open builds the dialog; later opens reuse it
-            var first = await OpenSettings(win);
-            log.Add($"Settings, first open (builds the dialog): {first} ms");
-            await Task.Delay(700);
-            await Save(win, $"03-settings-{t}");
-            win.Dialog.ShowSection("names");
-            await Task.Delay(500);
-            await Save(win, $"04-settings-names-{t}");
-            win.Dialog.ShowSection("look");
-            await Task.Delay(500);
-            await Save(win, $"05-settings-look-{t}");
-            win.Dialog.Hide();
-            await Task.Delay(800);
-
-            for (var i = 0; i < 3; i++)
-            {
-                var again = await OpenSettings(win);
-                log.Add($"Settings, open again: {again} ms");
-                await Task.Delay(500);
-                win.Dialog.Hide();
-                await Task.Delay(600);
-            }
-            log.Add("(time from the click to the dialog's Opened event, which fires as the open animation starts)");
-            File.WriteAllLines(Path.Combine(Dir!, $"timings-{t}.txt"), log);
+            await win.Core!.WhenReady;
+            await Task.Delay(2400);                                  // fonts, Mica, first layout and the welcome demo
+            await Save(win, $"01-welcome-{t}");
+            if (Library != null)
+                await RunLibrary(win, t);
+            await RunSettings(win, t);
+            if (Library != null)
+                await RunSave(win, t);
         }
         catch (Exception e)
         {
-            Crash(e);
+            Problems.Add("QA run stopped: " + e);
+        }
+        finally
+        {
+            File.WriteAllLines(Path.Combine(Dir!, $"timings-{t}.txt"), Timings);
+            if (Problems.Count > 0)
+                File.WriteAllLines(Path.Combine(Dir!, $"problems-{t}.txt"), Problems);
         }
         Application.Current.Exit();
+    }
+
+    private static async Task<bool> WaitFor(Func<bool> condition, double seconds)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed.TotalSeconds < seconds)
+        {
+            if (condition())
+                return true;
+            await Task.Delay(100);
+        }
+        return false;
+    }
+
+    private static bool Settled(MainWindow win) => win.Files.Count > 0 && win.Files.Rows.All(r =>
+        r.State is not ("queued" or "probing" or "reading") && !r.Rename.StartsWith("Looking up", StringComparison.Ordinal));
+
+    private static RowView? Row(MainWindow win, string start) =>
+        win.Files.Rows.FirstOrDefault(r => r.Name.StartsWith(start, StringComparison.OrdinalIgnoreCase));
+
+    private static async Task RunLibrary(MainWindow win, string t)
+    {
+        var watch = Stopwatch.StartNew();
+        await win.AddPathsAsync([Library!]);
+        if (!await WaitFor(() => Settled(win), 300))
+            Problems.Add("the library didn't finish reading within 5 minutes");
+        Note($"Add the sample library and read it all: {watch.Elapsed.TotalSeconds:F1} s ({win.Files.Count} files)");
+        await Task.Delay(900);
+        await Save(win, $"02-files-{t}");
+
+        // Review: lines to check, then the changes, then keep one line
+        var sev = Row(win, "Severance") ?? win.Files.Rows.FirstOrDefault(r => r.Review);
+        if (sev != null)
+        {
+            watch.Restart();
+            await win.OpenReviewAsync(sev.Uid);
+            Note($"Open Review ({sev.Name}): {watch.ElapsedMilliseconds} ms");
+            await Task.Delay(900);
+            await Save(win, $"03-review-{t}");
+            watch.Restart();
+            await win.OpenReviewAsync(sev.Uid, "changes");
+            Note($"Switch to Changes: {watch.ElapsedMilliseconds} ms ({win.PreviewList.Rows.Count} lines)");
+            await Task.Delay(700);
+            win.PreviewList.Step(1);
+            await Task.Delay(300);
+            watch.Restart();
+            await win.ToggleCurrentAsync();
+            Note($"Keep Original on one line: {watch.ElapsedMilliseconds} ms");
+            await Task.Delay(700);
+            await Save(win, $"04-review-kept-{t}");
+            if (win.PreviewList.Current?.Override != "orig")
+                Problems.Add("Keep Original didn't mark the line as kept");
+        }
+        if (Row(win, "Blade") is { } br)
+        {
+            await win.OpenReviewAsync(br.Uid);
+            await Task.Delay(900);
+            await Save(win, $"05-review-look-closer-{t}");
+        }
+        if (Row(win, "Planet") is { } pe)
+        {
+            await win.OpenReviewAsync(pe.Uid);
+            await Task.Delay(900);
+            await Save(win, $"06-review-no-sdh-{t}");
+        }
+
+        // the title picker, for the video TMDB isn't sure about
+        if (Row(win, "Slow") is { } sh)
+        {
+            await win.OpenReviewAsync(sh.Uid);
+            await Task.Delay(600);
+            win.AutoAnswer = async dialog =>
+            {
+                await Task.Delay(800);
+                await Save(win, $"07-title-dialog-{t}");
+                dialog.Choose(dialog.Keys.FirstOrDefault(k => k is not ("keep" or "cancel")) ?? "keep");
+            };
+            await win.ChooseTitleAsync(sh.Uid);
+            win.AutoAnswer = null;
+            await Task.Delay(800);
+        }
+        win.ShowTab(review: false);
+        await Task.Delay(700);
+        await Save(win, $"08-files-ready-{t}");
+    }
+
+    private static async Task RunSettings(MainWindow win, string t)
+    {
+        // Settings: the first open builds the dialog; later opens reuse it
+        var first = await OpenSettings(win);
+        Note($"Settings, first open (builds the dialog): {first} ms");
+        await Task.Delay(700);
+        await Save(win, $"09-settings-{t}");
+        win.Dialog.ShowSection("names");
+        await Task.Delay(500);
+        await Save(win, $"10-settings-names-{t}");
+        win.Dialog.ShowSection("look");
+        await Task.Delay(500);
+        await Save(win, $"11-settings-look-{t}");
+        win.Dialog.Hide();
+        await Task.Delay(800);
+        for (var i = 0; i < 2; i++)
+        {
+            var again = await OpenSettings(win);
+            Note($"Settings, open again: {again} ms");
+            await Task.Delay(400);
+            win.Dialog.Hide();
+            await Task.Delay(600);
+        }
+    }
+
+    private static async Task RunSave(MainWindow win, string t)
+    {
+        var asked = new List<string>();
+        var shot = 12;
+        win.AutoAnswer = async dialog =>
+        {
+            asked.Add(dialog.Key);
+            await Task.Delay(900);
+            await Save(win, $"{shot++}-ask-{dialog.Key}-{t}");
+            dialog.Choose(dialog.Key switch
+            {
+                "decision" => "guess",
+                "rewrite" => "go",
+                "names" => "keep",
+                "locks" => "skip",
+                _ => dialog.Keys.LastOrDefault() ?? "ok",
+            });
+        };
+        var done = new TaskCompletionSource<SaveDone>();
+        win.Saved += d => done.TrySetResult(d);
+        var watch = Stopwatch.StartNew();
+        await win.StartSaveAsync(null);
+        if (!await WaitFor(() => win.Files.Busy, 20))
+        {
+            Problems.Add("the save didn't start (asked: " + string.Join(", ", asked) + ")");
+            return;
+        }
+        await Task.Delay(1500);
+        await Save(win, $"{shot++}-saving-{t}");
+        var finished = await Task.WhenAny(done.Task, Task.Delay(TimeSpan.FromMinutes(10)));
+        Note($"Save everything: {watch.Elapsed.TotalSeconds:F1} s (questions: {string.Join(", ", asked)})");
+        if (finished != done.Task)
+        {
+            Problems.Add("the save didn't finish within 10 minutes");
+            return;
+        }
+        var result = await done.Task;
+        await Task.Delay(1200);
+        win.AutoAnswer = null;
+        await Save(win, $"{shot++}-saved-{t}");
+        var report = new
+        {
+            theme = t, asked, counts = result.Counts, status = result.Status, outputs = result.Outputs,
+            rows = win.Files.Rows.Select(r => new { r.Name, r.State, r.Detail, r.Badge }).ToList(),
+            library = Library,
+        };
+        File.WriteAllText(Path.Combine(Dir!, $"qa-{t}.json"),
+                          System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static async Task<long> OpenSettings(MainWindow win)
@@ -118,8 +270,7 @@ internal static partial class Shots
         var opened = new TaskCompletionSource();
         void OnOpened(ContentDialog d, ContentDialogOpenedEventArgs a) => opened.TrySetResult();
         dialog.Opened += OnOpened;
-        dialog.Prepare("videos");
-        _ = dialog.ShowAsync();
+        _ = win.ShowSettingsAsync();
         await opened.Task;
         watch.Stop();
         dialog.Opened -= OnOpened;

@@ -35,7 +35,7 @@ TOKENS = ["bg", "glass", "glass2", "stroke", "bg2", "bg3", "well", "bar_bg", "fi
           "nav3", "tile_on", "seg_track", "seg_line", "card_shadow", "shadow_deep", "backlight", "seg_glow",
           "nav_glow", "tip_bg", "tip_line", "fill", "fill2", "soft_ring", "bg_hover", "bg_sel", "focus",
           "field_line", "field_focus_line", "field_focus_bg", "selection", "scroll", "scroll_hover", "mute_line",
-          "bar_solid", "card_solid"]
+          "bar_solid", "card_solid", "screen", "screen_line", "removed", "removed_bg", "trim", "accent_light"]
 
 
 def pascal(name: str) -> str:

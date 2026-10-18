@@ -1,91 +1,56 @@
-<!-- One file in the Files list: a slim state bar on the left edge, the name, what happens to it, and one badge. -->
+<!-- One file in the Files list: a slim state bar on the left edge, the name, the new name or the title lookup, what
+     happens to it, the line count (or a progress bar while it is read or saved), one badge, Review and remove. -->
 <UserControl
     x:Class="SubScrub.Controls.FileRow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:c="using:SubScrub.Controls">
 
-    <Grid x:Name="RowRoot" Padding="0,11,0,11" ColumnSpacing="14"
-          BorderBrush="{ThemeResource S4BorderBrush}" BorderThickness="0,0,0,1">
-        <VisualStateManager.VisualStateGroups>
-            <VisualStateGroup x:Name="StateGroup">
-                <VisualState x:Name="Ok">
-                    <VisualState.Setters>
-                        <Setter Target="Bar.Fill" Value="{ThemeResource S4OkBrush}" />
-                        <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4OkBgBrush}" />
-                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4OkBrush}" />
-                    </VisualState.Setters>
-                </VisualState>
-                <VisualState x:Name="Warn">
-                    <VisualState.Setters>
-                        <Setter Target="Bar.Fill" Value="{ThemeResource S4WarnBrush}" />
-                        <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4WarnBgBrush}" />
-                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4WarnBrush}" />
-                    </VisualState.Setters>
-                </VisualState>
-                <VisualState x:Name="Bad">
-                    <VisualState.Setters>
-                        <Setter Target="Bar.Fill" Value="{ThemeResource S4BadBrush}" />
-                        <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4BadBgBrush}" />
-                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4BadBrush}" />
-                    </VisualState.Setters>
-                </VisualState>
-                <VisualState x:Name="Mute">
-                    <VisualState.Setters>
-                        <Setter Target="Bar.Fill" Value="{ThemeResource S4MuteLineBrush}" />
-                        <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4MuteBgBrush}" />
-                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4Text2Brush}" />
-                    </VisualState.Setters>
-                </VisualState>
-            </VisualStateGroup>
-        </VisualStateManager.VisualStateGroups>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="3" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="128" />
-            <ColumnDefinition Width="116" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
+    <Grid x:Name="RowRoot" Background="Transparent">
+        <Rectangle x:Name="Separator" Height="1" VerticalAlignment="Top" Margin="0,0,0,0"
+                   Fill="{ThemeResource S4BorderBrush}" />
+        <Border x:Name="Hover" CornerRadius="10" Margin="-8,2,-4,2" Background="{ThemeResource S4BgHoverBrush}"
+                Opacity="0" IsHitTestVisible="False" />
+        <Grid Padding="0,11,0,11" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="128" />
+                <ColumnDefinition Width="118" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <Rectangle x:Name="Bar" Width="3" RadiusX="1.5" RadiusY="1.5" Margin="0,2,0,2" />
-        <c:SolarIcon Grid.Column="1" Glyph="clapperboard-play" Size="20" Margin="4,0,0,0"
-                     VerticalAlignment="Center" Foreground="{ThemeResource S4Text2Brush}" />
+            <Rectangle x:Name="Bar" Width="3" RadiusX="1.5" RadiusY="1.5" Margin="0,2,0,2" />
+            <c:SolarIcon x:Name="KindIcon" Grid.Column="1" Glyph="clapperboard-play" Size="20" Margin="4,0,0,0"
+                         VerticalAlignment="Center" Foreground="{ThemeResource S4Text2Brush}" />
 
-        <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center">
-            <TextBlock x:Name="NameText" Style="{StaticResource S4Medium}" />
-            <StackPanel x:Name="RenameLine" Orientation="Horizontal" Spacing="6">
-                <c:SolarIcon Glyph="arrow-right" Size="14" VerticalAlignment="Center" Foreground="{ThemeResource S4Text2Brush}" />
-                <TextBlock x:Name="RenameText" Style="{StaticResource S4Text}" FontSize="13" />
-            </StackPanel>
-            <StackPanel x:Name="WarnLine" Orientation="Horizontal" Spacing="6" Visibility="Collapsed">
-                <c:SolarIcon Glyph="danger-triangle" Size="14" VerticalAlignment="Center" Foreground="{ThemeResource S4WarnBrush}" />
-                <TextBlock x:Name="WarnText" Style="{StaticResource S4Text}" FontSize="13" Foreground="{ThemeResource S4WarnBrush}" />
-            </StackPanel>
-            <TextBlock x:Name="TrackText" Style="{StaticResource S4Quiet}" />
-        </StackPanel>
-
-        <StackPanel x:Name="CountPanel" Grid.Column="3" Orientation="Horizontal" Spacing="5"
-                    HorizontalAlignment="Right" VerticalAlignment="Center">
-            <TextBlock x:Name="CountText" Style="{StaticResource S4Count}" FontSize="13" />
-            <TextBlock Text="to clean" Style="{StaticResource S4Quiet}" />
-        </StackPanel>
-
-        <Border x:Name="BadgeChrome" Grid.Column="4" Style="{StaticResource S4Badge}" Margin="12,0,0,0">
-            <!-- the state sets this presenter's colour; the text and the icon follow it -->
-            <ContentPresenter x:Name="BadgeInk">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <c:SolarIcon x:Name="BadgeIcon" Size="12" VerticalAlignment="Center" />
-                    <TextBlock x:Name="BadgeText" Style="{StaticResource S4BadgeText}" Foreground="{Binding Foreground, ElementName=BadgeInk}" />
+            <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center">
+                <TextBlock x:Name="NameText" Style="{StaticResource S4Medium}" />
+                <StackPanel x:Name="RenameLine" Orientation="Horizontal" Spacing="6" Visibility="Collapsed">
+                    <c:SolarIcon x:Name="RenameIcon" Glyph="arrow-right" Size="14" VerticalAlignment="Center" />
+                    <TextBlock x:Name="RenameText" Style="{StaticResource S4Text}" FontSize="13" />
                 </StackPanel>
-            </ContentPresenter>
-        </Border>
+                <TextBlock x:Name="DetailText" Style="{StaticResource S4Quiet}" />
+            </StackPanel>
 
-        <Button x:Name="ReviewButton" Grid.Column="5" Content="Review" Style="{StaticResource S4SmallButton}" />
-        <Button x:Name="RemoveButton" Grid.Column="6" Style="{StaticResource S4IconButton}" Width="30" Height="30"
-                ToolTipService.ToolTip="Remove from the list" AutomationProperties.Name="Remove from the list">
-            <c:SolarIcon Glyph="close" Size="16" />
-        </Button>
+            <StackPanel x:Name="CountPanel" Grid.Column="3" Orientation="Horizontal" Spacing="5"
+                        HorizontalAlignment="Right" VerticalAlignment="Center">
+                <TextBlock x:Name="CountText" Style="{StaticResource S4Count}" FontSize="13" />
+                <TextBlock x:Name="CountLabel" Style="{StaticResource S4Quiet}" />
+            </StackPanel>
+            <ProgressBar x:Name="RowProgress" Grid.Column="3" Width="110" HorizontalAlignment="Right"
+                         VerticalAlignment="Center" Maximum="1" Visibility="Collapsed"
+                         Foreground="{ThemeResource S4BtnBrush}" Background="{ThemeResource S4SegTrackBrush}" />
+
+            <c:StateBadge x:Name="Badge" Grid.Column="4" Margin="12,0,0,0" HorizontalAlignment="Left" />
+
+            <Button x:Name="ReviewButton" Grid.Column="5" Content="Review" Style="{StaticResource S4SmallButton}" />
+            <Button x:Name="RemoveButton" Grid.Column="6" Style="{StaticResource S4IconButton}" Width="30" Height="30"
+                    ToolTipService.ToolTip="Remove from the list" AutomationProperties.Name="Remove from the list">
+                <c:SolarIcon Glyph="close" Size="16" />
+            </Button>
+        </Grid>
     </Grid>
 </UserControl>

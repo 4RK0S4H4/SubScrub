@@ -8,7 +8,7 @@
     <RootNamespace>SubScrub</RootNamespace>
     <AssemblyName>SubScrub</AssemblyName>
     <!-- ships as SubScrub 4.0 once it matches the Qt app (which stays on 3.x); a dev version until then -->
-    <Version>4.0.0-dev.1</Version>
+    <Version>4.0.0-dev.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\subscrub.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
