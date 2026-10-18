@@ -201,6 +201,11 @@ it: remove the torrent afterwards (keep the files), or use *New File* to keep th
 
 ## What's new
 
+### 3.0.1
+
+**Mica fix.** With the Windows 11 Mica backdrop turned on, the top bar now lets Mica show through, so it matches the
+title bar above it instead of looking like a separate strip.
+
 ### 3.0
 
 **A new icon, a real installer and safer saving.**
