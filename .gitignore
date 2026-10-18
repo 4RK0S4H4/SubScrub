@@ -38,3 +38,8 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# WinUI build output
+winui/**/bin/
+winui/**/obj/
+winui/**/.vs/

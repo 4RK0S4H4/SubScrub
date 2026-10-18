@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SubScrub's native Windows UI (WinUI 3). Unpackaged and self-contained: the output folder runs as it is,
+       with no Windows App SDK runtime to install. Build: see winui/README.md. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>SubScrub</RootNamespace>
+    <AssemblyName>SubScrub</AssemblyName>
+    <!-- ships as SubScrub 4.0 once it matches the Qt app (which stays on 3.x); a dev version until then -->
+    <Version>4.0.0-dev.1</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\subscrub.ico</ApplicationIcon>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <!-- unpackaged apps still need the MSIX tooling to build resources.pri (the compiled XAML and WinUI's own themes) -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- a copy of every page for the screenshot mode's XAML check (Services/Diagnose.cs) -->
+    <EmbeddedResource Include="**\*.xaml" Exclude="bin\**;obj\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="Assets\Fonts\*.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\fonts\OFL-Inter.txt" Link="Assets\Fonts\OFL-Inter.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\subscrub.ico" Link="Assets\subscrub.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\subscrub.png" Link="Assets\subscrub.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9169" />
+  </ItemGroup>
+</Project>

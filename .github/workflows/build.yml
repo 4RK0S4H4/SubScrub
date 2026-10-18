@@ -5,6 +5,8 @@
 #   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
 #     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media)
+#   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it, run its screenshot mode in
+#     both themes, attach the app folder ("SubScrub-WinUI") and the screenshots ("winui-screenshots"). Sample data only.
 name: build
 
 on:
@@ -212,3 +214,75 @@ jobs:
           name: screenshots
           path: screenshots/*.png
           if-no-files-found: error
+
+  # the native WinUI 3 app (winui/), in progress alongside the Python app: build, then screenshots with sample data
+  winui:
+    if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build (unpackaged, self-contained)
+        shell: pwsh
+        run: |
+          dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          if (-not (Get-ChildItem winui-out\*.pri)) { throw "no .pri file in the output: the XAML could not load" }
+          Get-ChildItem winui-out\*.pri, winui-out\SubScrub.exe | Format-Table Name, Length
+
+      # the runner's screen is small; try for 1920x1080 so the on-screen shots aren't cramped
+      - name: Screen size
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Get-CimInstance Win32_VideoController | Select-Object CurrentHorizontalResolution, CurrentVerticalResolution
+
+      - name: Screenshots and Settings timing
+        shell: pwsh
+        run: |
+          $dir = Join-Path $PWD "winui-shots"
+          foreach ($t in 'dark', 'light') {
+            $p = Start-Process winui-out\SubScrub.exe -ArgumentList "--shots", "`"$dir`"", "--theme", $t, "--size", "1920x1080" -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "screenshot run ($t) did not finish" }
+            if (Test-Path "$dir\diagnose.txt") { Write-Host "--- XAML check ($t)"; Get-Content "$dir\diagnose.txt"; Remove-Item "$dir\diagnose.txt" }
+            if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt"; throw "SubScrub crashed ($t)" }
+          }
+          Get-ChildItem $dir | Format-Table Name, Length
+          Get-Content "$dir\timings-*.txt"
+          if (Test-Path "$dir\screen-capture-errors.txt") { Get-Content "$dir\screen-capture-errors.txt" }
+          $n = @(Get-ChildItem "$dir\0*.png").Count
+          if ($n -lt 10) { throw "expected 10 screenshots, got $n" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SubScrub-WinUI
+          path: winui-out/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: winui-screenshots
+          path: winui-shots/
+          if-no-files-found: warn
+
+      # artifact downloads are blocked from cloud Claude sessions, so the same images also go to a throwaway branch
+      # (sample data only; force-pushed each run, never merged)
+      - name: Publish the screenshots to the winui-screenshots branch
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        run: |
+          [ -d winui-shots ] || exit 0
+          cd winui-shots
+          git init -q -b winui-screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "WinUI screenshots for ${{ github.event.pull_request.head.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" winui-screenshots
