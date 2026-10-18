@@ -24,10 +24,37 @@ public sealed partial class SolarIcon : UserControl
     public bool Duo { get => (bool)GetValue(DuoProperty); set => SetValue(DuoProperty, value); }
     public double Size { get => (double)GetValue(SizeProperty); set => SetValue(SizeProperty, value); }
 
+    // where the colour comes from: the icon's own Foreground when it is set, otherwise the nearest
+    // ContentPresenter or control above it (a UserControl doesn't inherit Foreground the way text does)
+    private DependencyObject _ink;
+
     public SolarIcon()
     {
+        _ink = this;
         IsTabStop = false;
         Resize();
+        Loaded += (_, _) => FindInk();
+    }
+
+    private void FindInk()
+    {
+        DependencyObject source = this;
+        if (ReadLocalValue(ForegroundProperty) == DependencyProperty.UnsetValue)
+        {
+            for (var p = VisualTreeHelper.GetParent(this); p != null; p = VisualTreeHelper.GetParent(p))
+            {
+                if (p is ContentPresenter or Control)
+                {
+                    source = p;
+                    break;
+                }
+            }
+        }
+        if (!ReferenceEquals(source, _ink))
+        {
+            _ink = source;
+            Rebuild();
+        }
     }
 
     private void Resize()
@@ -52,7 +79,7 @@ public sealed partial class SolarIcon : UserControl
                 Data = (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), part.Data),
                 Opacity = part.Opacity,
             };
-            var ink = new Binding { Source = this, Path = new PropertyPath(nameof(Foreground)) };
+            var ink = new Binding { Source = _ink, Path = new PropertyPath(nameof(Foreground)) };
             if (part.Fill)
                 path.SetBinding(Shape.FillProperty, ink);
             if (part.Stroke > 0)

@@ -13,32 +13,28 @@
                     <VisualState.Setters>
                         <Setter Target="Bar.Fill" Value="{ThemeResource S4OkBrush}" />
                         <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4OkBgBrush}" />
-                        <Setter Target="BadgeText.Foreground" Value="{ThemeResource S4OkBrush}" />
-                        <Setter Target="BadgeIcon.Foreground" Value="{ThemeResource S4OkBrush}" />
+                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4OkBrush}" />
                     </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Warn">
                     <VisualState.Setters>
                         <Setter Target="Bar.Fill" Value="{ThemeResource S4WarnBrush}" />
                         <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4WarnBgBrush}" />
-                        <Setter Target="BadgeText.Foreground" Value="{ThemeResource S4WarnBrush}" />
-                        <Setter Target="BadgeIcon.Foreground" Value="{ThemeResource S4WarnBrush}" />
+                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4WarnBrush}" />
                     </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Bad">
                     <VisualState.Setters>
                         <Setter Target="Bar.Fill" Value="{ThemeResource S4BadBrush}" />
                         <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4BadBgBrush}" />
-                        <Setter Target="BadgeText.Foreground" Value="{ThemeResource S4BadBrush}" />
-                        <Setter Target="BadgeIcon.Foreground" Value="{ThemeResource S4BadBrush}" />
+                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4BadBrush}" />
                     </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Mute">
                     <VisualState.Setters>
                         <Setter Target="Bar.Fill" Value="{ThemeResource S4MuteLineBrush}" />
                         <Setter Target="BadgeChrome.Background" Value="{ThemeResource S4MuteBgBrush}" />
-                        <Setter Target="BadgeText.Foreground" Value="{ThemeResource S4Text2Brush}" />
-                        <Setter Target="BadgeIcon.Foreground" Value="{ThemeResource S4Text2Brush}" />
+                        <Setter Target="BadgeInk.Foreground" Value="{ThemeResource S4Text2Brush}" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
@@ -77,10 +73,13 @@
         </StackPanel>
 
         <Border x:Name="BadgeChrome" Grid.Column="4" Style="{StaticResource S4Badge}" Margin="12,0,0,0">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-                <c:SolarIcon x:Name="BadgeIcon" Size="12" VerticalAlignment="Center" />
-                <TextBlock x:Name="BadgeText" Style="{StaticResource S4BadgeText}" />
-            </StackPanel>
+            <!-- the state sets this presenter's colour; the text and the icon follow it -->
+            <ContentPresenter x:Name="BadgeInk">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <c:SolarIcon x:Name="BadgeIcon" Size="12" VerticalAlignment="Center" />
+                    <TextBlock x:Name="BadgeText" Style="{StaticResource S4BadgeText}" Foreground="{Binding Foreground, ElementName=BadgeInk}" />
+                </StackPanel>
+            </ContentPresenter>
         </Border>
 
         <Button x:Name="ReviewButton" Grid.Column="5" Content="Review" Style="{StaticResource S4SmallButton}" />

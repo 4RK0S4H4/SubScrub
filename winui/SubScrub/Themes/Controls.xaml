@@ -754,7 +754,7 @@
                                         <Setter Target="SecondaryButton.IsTabStop" Value="True" />
                                         <Setter Target="CloseButton.IsTabStop" Value="True" />
                                         <Setter Target="LayoutRoot.Visibility" Value="Visible" />
-                                        <Setter Target="SmokeLayerBackground.Visibility" Value="Collapsed" />
+                                        <Setter Target="LayoutRoot.Background" Value="{x:Null}" />
                                     </VisualState.Setters>
                                 </VisualState>
                             </VisualStateGroup>
