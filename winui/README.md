@@ -16,7 +16,17 @@ updates) and Settings saved to disk.
 Settings live where the Qt app keeps them (`HKEY_CURRENT_USER\Software\SubScrub\SubScrub`), so both apps share one set
 of settings and one TMDB key.
 
-Next: port the engine to C# module by module, checked against `tests/fixtures/` and `tests/test_helper.py`.
+**Porting the engine to C# (in stages, decided 2026-10-19).** Each stage moves one part of the Python engine into
+`winui/SubScrub.Engine` (plain .NET 8, no Windows dependency, so it builds and is checked on Linux too) and must give
+*identical* results: `python tools/cleaner_parity.py --library samples/library` runs both on every cleaner call the
+test suites make, the fixtures and every sample track under each option, and fails on any difference in text,
+rules, risk, reasons, notes, counts or the saved file (CI runs it in the `screenshots` job). The window keeps using
+the Python helper for anything not ported yet.
+
+- Stage 1 (done): the cleaner (`Cleaner.cs`) and the subtitle formats (`SubFormats.cs`), with `Py.cs` for the
+  few Python string rules the results depend on. Change `subscrub/cleaner.py` first, then the port, then run the check.
+- Next: track picking and the file list's verdicts (`batch.py`, `core.py`), then probing and muxing, TMDB, the
+  safe swap and the files-in-use check. When the last one is done, the `core` folder goes.
 
 ## Build (Windows)
 
@@ -57,5 +67,7 @@ weight) come from `python tools/make_winui.py`. Change the sources and run it ag
 - `Controls/`: `SolarIcon`, `Segmented`, `OptionRow`, `FileRow`, `Parts.cs` (badge, banner, track tile, edit row,
   choice button), `Preview.cs` (caption screen, timeline, the before/after list).
 - `Views/`: `SettingsDialog` (built once and reused) and `Dialogs.cs` (questions, the title picker, the log).
+- `../SubScrub.Engine/`: the engine in C# (stage 1: `Cleaner.cs`, `SubFormats.cs`); `../SubScrub.Engine.Parity/`
+  runs it for the parity check.
 - `Models/Views.cs`: what the engine sends back. `Services/`: `Core` (the engine process), `Job` (the engine ends
   with the app), theme lookups, DPI, the QA run (`Shots`) and the XAML check (`Diagnose`).
