@@ -4,7 +4,8 @@
 #   - "Run workflow" on main with a version typed in (e.g. 2.7.3): does the same and creates the tag itself
 #   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
-#     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media)
+#     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media), and
+#     the check that the C# engine cleans exactly like the Python one (tools/cleaner_parity.py)
 #   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it with its engine
 #     (subscrub-core.exe, PyInstaller), then run its scripted QA on the generated sample library in both themes and a
 #     small window: add, review, pick a title, save, and check the saved videos with ffprobe and mkvmerge. Attaches
@@ -204,6 +205,15 @@ jobs:
 
       - name: Make the sample library
         run: python -m tests.make_samples --library
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # the C# engine (winui/SubScrub.Engine) must clean exactly like the Python one: every recorded test call,
+      # the fixtures and every sample track under each option, compared line by line
+      - name: C# engine parity
+        run: python tools/cleaner_parity.py --library samples/library
 
       - name: Screenshots
         env:

@@ -63,6 +63,7 @@ python -m tests.test_ui                                         # contrast (WCAG
 python -m tests.test_pipeline                                    # makes its own sample videos (ffmpeg + mkvmerge)
 python -m tests.test_edge                                        # awkward files through the real save path
 python -m tests.test_helper                                      # the WinUI app's engine helper: JSON protocol, parity, a save
+python tools/cleaner_parity.py [--library samples/library]      # the C# engine must clean exactly like the Python one (.NET 8 SDK)
 
 python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
 python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state
@@ -107,6 +108,9 @@ can't push tags, so don't try `git push` of a tag.)
 - `subscrub/core.py`: the Qt window's logic without Qt (file list, verdicts, Review data, questions at save time, the
   batch save). `subscrub/helper.py`: drives it over JSON lines on stdin/stdout; bundled as `subscrub-core.exe`
   (`run_core.py`) for the WinUI app. Keep `core.py` in step with `ui/main_window.py` when behaviour changes.
+- `winui/SubScrub.Engine/`: the engine being ported to C# in stages (stage 1: the cleaner and subtitle formats). It
+  must match the Python engine exactly (`tools/cleaner_parity.py`, run in CI): a change to a cleaning rule goes into
+  `cleaner.py` and `Cleaner.cs` together.
 - `winui/`: the native WinUI 3 rewrite in progress (see `winui/README.md`); the Qt app keeps shipping until it
   matches. `tools/make_winui.py` regenerates its tokens, icons and fonts from the Python sources;
   `tools/winui_qa_check.py` checks what its scripted QA run saved.

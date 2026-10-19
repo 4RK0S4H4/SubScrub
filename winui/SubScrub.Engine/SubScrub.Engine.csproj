@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SubScrub's engine in C#, ported from the Python one module by module (stage 1: the cleaner and the subtitle
+       formats). Plain .NET with no Windows dependency, so it builds and is checked on Linux too:
+       tools/cleaner_parity.py runs it against the Python cleaner and fails on any difference. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SubScrub.Engine</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

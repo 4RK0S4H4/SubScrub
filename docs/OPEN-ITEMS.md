@@ -68,3 +68,10 @@ wins. The "to check" grading runs without the SDH cross-check in the regular-tra
 - Picture-based subtitles (PGS/VobSub) can't be cleaned (no OCR).
 - Only verified offscreen on Linux: the title-bar colour, Mica, Recycle Bin, Restart Manager, real TMDB calls and
   font loading in the exe all need a check on the user's Windows PC.
+
+## WinUI engine port (decided by the user 2026-10-19)
+
+The engine moves from Python to C# in stages (cleaner and subtitle formats first; then track picking and verdicts,
+muxing, TMDB, the safe swap and the files-in-use check), each shipping working, with the Python helper doing the rest
+until the last stage. The C# engine must give identical results, not just the same text: `tools/cleaner_parity.py`
+compares cleaned text, the "to check" grading and its reasons, notes and counts, and fails CI on any difference.
