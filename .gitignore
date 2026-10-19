@@ -43,3 +43,6 @@ desktop.ini
 winui/**/bin/
 winui/**/obj/
 winui/**/.vs/
+helper-dist/
+winui-out/
+winui-shots/

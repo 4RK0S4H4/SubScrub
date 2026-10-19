@@ -5,8 +5,10 @@
 #   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
 #     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media)
-#   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it, run its screenshot mode in
-#     both themes, attach the app folder ("SubScrub-WinUI") and the screenshots ("winui-screenshots"). Sample data only.
+#   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it with its engine
+#     (subscrub-core.exe, PyInstaller), then run its scripted QA on the generated sample library in both themes and a
+#     small window: add, review, pick a title, save, and check the saved videos with ffprobe and mkvmerge. Attaches
+#     the app folder ("SubScrub-WinUI") and the screenshots ("winui-screenshots"). Generated media only.
 name: build
 
 on:
@@ -61,6 +63,7 @@ jobs:
           python -m tests.test_ui
           python -m tests.test_pipeline
           python -m tests.test_edge
+          python -m tests.test_helper
 
       - name: Build SubScrub.exe
         run: >
@@ -178,6 +181,7 @@ jobs:
           python -m tests.test_ui
           python -m tests.test_pipeline
           python -m tests.test_edge
+          python -m tests.test_helper
 
   screenshots:
     if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
@@ -215,17 +219,40 @@ jobs:
           path: screenshots/*.png
           if-no-files-found: error
 
-  # the native WinUI 3 app (winui/), in progress alongside the Python app: build, then screenshots with sample data
+      # the same generated videos drive the WinUI app's QA run on Windows (making them there is too slow)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sample-library
+          path: samples/library/
+          if-no-files-found: error
+          retention-days: 3
+
+  # the native WinUI 3 app (winui/), in progress alongside the Python app: build it with its engine, then drive the
+  # real flows on generated sample videos and check what it saved
   winui:
     if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
+    needs: screenshots
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python, FFmpeg and MKVToolNix
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          choco install ffmpeg mkvtoolnix -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco failed" }
 
       - name: Build (unpackaged, self-contained)
         shell: pwsh
@@ -235,6 +262,23 @@ jobs:
           if (-not (Get-ChildItem winui-out\*.pri)) { throw "no .pri file in the output: the XAML could not load" }
           Get-ChildItem winui-out\*.pri, winui-out\SubScrub.exe | Format-Table Name, Length
 
+      # the engine: the Python cleaner, muxing, TMDB and safe swap as one folder, in "core" next to SubScrub.exe
+      - name: Build the engine (subscrub-core.exe)
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --log-level WARN --onedir --console --name subscrub-core `
+            --distpath helper-dist --exclude-module PySide6 --exclude-module tkinter --hidden-import send2trash run_core.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+          Copy-Item -Recurse helper-dist\subscrub-core winui-out\core
+          $reply = '{"id":1,"cmd":"hello","args":{}}' | & winui-out\core\subscrub-core.exe --settings "$env:RUNNER_TEMP\core-smoke.json"
+          $reply | Select-Object -First 2
+          if (-not ($reply -match '"ok":true')) { throw "the engine didn't answer" }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sample-library
+          path: samples/library
+
       # the runner's screen is small; try for 1920x1080 so the on-screen shots aren't cramped
       - name: Screen size
         shell: pwsh
@@ -243,27 +287,41 @@ jobs:
           Set-DisplayResolution -Width 1920 -Height 1080 -Force
           Get-CimInstance Win32_VideoController | Select-Object CurrentHorizontalResolution, CurrentVerticalResolution
 
-      - name: Screenshots and Settings timing
+      - name: Scripted QA (add, review, title, settings, save) in both themes and a small window
         shell: pwsh
         run: |
           $dir = Join-Path $PWD "winui-shots"
-          foreach ($t in 'dark', 'light') {
-            $p = Start-Process winui-out\SubScrub.exe -ArgumentList "--shots", "`"$dir`"", "--theme", $t, "--size", "1920x1080" -PassThru
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $fail = @()
+          foreach ($run in @(@('dark', '1920x1080', ''), @('light', '1920x1080', ''), @('dark', '1000x680', '-1000x680'))) {
+            $t, $size, $tag = $run
+            $lib = Join-Path $env:RUNNER_TEMP "library-$t$tag"
+            if (Test-Path $lib) { Remove-Item -Recurse -Force $lib }
+            Copy-Item -Recurse samples\library $lib
+            $p = Start-Process winui-out\SubScrub.exe -ArgumentList "--shots", "`"$dir`"", "--library", "`"$lib`"", "--theme", $t, "--size", $size -PassThru
             $null = $p.Handle
-            if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "screenshot run ($t) did not finish" }
-            if (Test-Path "$dir\diagnose.txt") { Write-Host "--- XAML check ($t)"; Get-Content "$dir\diagnose.txt"; Remove-Item "$dir\diagnose.txt" }
-            if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt"; throw "SubScrub crashed ($t)" }
+            if (-not $p.WaitForExit(1200000)) { $p.Kill(); $fail += "QA run ($t$tag) did not finish" }
+            if (Test-Path "$dir\diagnose.txt") { Write-Host "--- XAML check ($t$tag)"; Get-Content "$dir\diagnose.txt"; Remove-Item "$dir\diagnose.txt" }
+            if (Test-Path "$dir\crash.txt") { Get-Content "$dir\crash.txt"; $fail += "SubScrub crashed ($t$tag)"; Remove-Item "$dir\crash.txt" }
+            if (Test-Path "$dir\problems-$t$tag.txt") { Get-Content "$dir\problems-$t$tag.txt"; $fail += "QA problems ($t$tag)" }
+            Write-Host "--- timings ($t$tag)"
+            if (Test-Path "$dir\timings-$t$tag.txt") { Get-Content "$dir\timings-$t$tag.txt" }
+            if (Test-Path "$dir\qa-$t$tag.json") {
+              Write-Host "--- saved videos ($t$tag)"
+              python tools/winui_qa_check.py "$dir\qa-$t$tag.json" samples\library
+              if ($LASTEXITCODE -ne 0) { $fail += "saved videos are wrong ($t$tag)" }
+            } else { $fail += "no qa-$t$tag.json: the save didn't finish" }
           }
           Get-ChildItem $dir | Format-Table Name, Length
-          Get-Content "$dir\timings-*.txt"
           if (Test-Path "$dir\screen-capture-errors.txt") { Get-Content "$dir\screen-capture-errors.txt" }
-          $n = @(Get-ChildItem "$dir\0*.png").Count
-          if ($n -lt 10) { throw "expected 10 screenshots, got $n" }
+          if ($fail.Count -gt 0) { throw ($fail -join "; ") }
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: SubScrub-WinUI
           path: winui-out/
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
         if: always()

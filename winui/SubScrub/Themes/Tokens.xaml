@@ -72,6 +72,12 @@
             <Color x:Key="S4MuteLineColor">#736E6062</Color>
             <Color x:Key="S4BarSolidColor">#FFFBFAFA</Color>
             <Color x:Key="S4CardSolidColor">#FFFBFAFA</Color>
+            <Color x:Key="S4ScreenColor">#FF0B0B0C</Color>
+            <Color x:Key="S4ScreenLineColor">#FF26262B</Color>
+            <Color x:Key="S4RemovedColor">#FF3D3D44</Color>
+            <Color x:Key="S4RemovedBgColor">#1F3D3D44</Color>
+            <Color x:Key="S4TrimColor">#FFA3A3AB</Color>
+            <Color x:Key="S4AccentLightColor">#FFFDA4AF</Color>
             <Color x:Key="S4AccentColor">#FFC81E3A</Color>
             <Color x:Key="S4PrimaryGlowColor">#4CC81E3A</Color>
             <Color x:Key="S4PrimaryGlowEdgeColor">#00C81E3A</Color>
@@ -154,6 +160,12 @@
             <SolidColorBrush x:Key="S4MuteLineBrush" Color="{StaticResource S4MuteLineColor}"/>
             <SolidColorBrush x:Key="S4BarSolidBrush" Color="{StaticResource S4BarSolidColor}"/>
             <SolidColorBrush x:Key="S4CardSolidBrush" Color="{StaticResource S4CardSolidColor}"/>
+            <SolidColorBrush x:Key="S4ScreenBrush" Color="{StaticResource S4ScreenColor}"/>
+            <SolidColorBrush x:Key="S4ScreenLineBrush" Color="{StaticResource S4ScreenLineColor}"/>
+            <SolidColorBrush x:Key="S4RemovedBrush" Color="{StaticResource S4RemovedColor}"/>
+            <SolidColorBrush x:Key="S4RemovedBgBrush" Color="{StaticResource S4RemovedBgColor}"/>
+            <SolidColorBrush x:Key="S4TrimBrush" Color="{StaticResource S4TrimColor}"/>
+            <SolidColorBrush x:Key="S4AccentLightBrush" Color="{StaticResource S4AccentLightColor}"/>
             <SolidColorBrush x:Key="S4AccentBrush" Color="{StaticResource S4AccentColor}"/>
             <SolidColorBrush x:Key="S4TipTextBrush" Color="{StaticResource S4TipTextColor}"/>
             <SolidColorBrush x:Key="S4ClearBrush" Color="{StaticResource S4ClearColor}"/>
@@ -265,6 +277,12 @@
             <Color x:Key="S4MuteLineColor">#73999999</Color>
             <Color x:Key="S4BarSolidColor">#FF1E1B1C</Color>
             <Color x:Key="S4CardSolidColor">#FF171516</Color>
+            <Color x:Key="S4ScreenColor">#FF0B0B0C</Color>
+            <Color x:Key="S4ScreenLineColor">#FF26262B</Color>
+            <Color x:Key="S4RemovedColor">#FFDADADF</Color>
+            <Color x:Key="S4RemovedBgColor">#1FDADADF</Color>
+            <Color x:Key="S4TrimColor">#FF8E8E97</Color>
+            <Color x:Key="S4AccentLightColor">#FFFDA4AF</Color>
             <Color x:Key="S4AccentColor">#FFC81E3A</Color>
             <Color x:Key="S4PrimaryGlowColor">#26FF2D4E</Color>
             <Color x:Key="S4PrimaryGlowEdgeColor">#00FF2D4E</Color>
@@ -348,6 +366,12 @@
             <SolidColorBrush x:Key="S4MuteLineBrush" Color="{StaticResource S4MuteLineColor}"/>
             <SolidColorBrush x:Key="S4BarSolidBrush" Color="{StaticResource S4BarSolidColor}"/>
             <SolidColorBrush x:Key="S4CardSolidBrush" Color="{StaticResource S4CardSolidColor}"/>
+            <SolidColorBrush x:Key="S4ScreenBrush" Color="{StaticResource S4ScreenColor}"/>
+            <SolidColorBrush x:Key="S4ScreenLineBrush" Color="{StaticResource S4ScreenLineColor}"/>
+            <SolidColorBrush x:Key="S4RemovedBrush" Color="{StaticResource S4RemovedColor}"/>
+            <SolidColorBrush x:Key="S4RemovedBgBrush" Color="{StaticResource S4RemovedBgColor}"/>
+            <SolidColorBrush x:Key="S4TrimBrush" Color="{StaticResource S4TrimColor}"/>
+            <SolidColorBrush x:Key="S4AccentLightBrush" Color="{StaticResource S4AccentLightColor}"/>
             <SolidColorBrush x:Key="S4AccentBrush" Color="{StaticResource S4AccentColor}"/>
             <SolidColorBrush x:Key="S4TipTextBrush" Color="{StaticResource S4TipTextColor}"/>
             <SolidColorBrush x:Key="S4ClearBrush" Color="{StaticResource S4ClearColor}"/>

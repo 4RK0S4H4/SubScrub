@@ -1,30 +1,47 @@
 # SubScrub for Windows (WinUI 3), in progress
 
 A native rewrite of SubScrub's window in WinUI 3 (C#, .NET 8, Windows App SDK 1.8), keeping the S4 Glass look. The
-Python/Qt app in `subscrub/` is still the one that ships; this folder grows alongside it until it matches.
+Python/Qt app in `subscrub/` is still the one that ships; this folder grows alongside it until it matches. It ships as
+SubScrub 4.0 once it does (until then the csproj says `4.0.0-dev.N`; the Qt app stays on 3.x).
 
-**Stage 1 (now):** the window with real Mica and the top bar as the title bar, the Files and Review tabs, the Files list
-(state bars and badges) and Settings as a native dialog, all with **sample data**. It reads and changes nothing on disk,
-and Settings is kept in memory only.
+**Stage 2 (now): the real engine.** The window is C#; the cleaning, muxing, TMDB lookups, safe swap and the "files in
+use" check are the Python engine, bundled with PyInstaller as `core\subscrub-core.exe` next to `SubScrub.exe`. The
+window starts it and talks to it with one JSON object per line over stdin/stdout (`subscrub/helper.py` describes the
+protocol; `subscrub/core.py` is the Qt window's logic without Qt). Working: Add Files, Add Folder, drag and drop,
+reading with real states and badges, `.srt` sidecars, the files-in-use warning, every question at save time
+(lines it isn't sure about, unsure titles, rewriting in place, overwriting), the TMDB title picker, saving with
+progress, Stop, Review (tracks, edits per file, the caption screen, timeline and before/after list with one-row
+updates) and Settings saved to disk.
 
-Next: a Python helper exe (`subscrub-core.exe`) that the window drives with JSON commands (probe, clean, save, rename),
-then porting the engine to C# module by module, checked against `tests/fixtures/`.
+Settings live where the Qt app keeps them (`HKEY_CURRENT_USER\Software\SubScrub\SubScrub`), so both apps share one set
+of settings and one TMDB key.
+
+Next: port the engine to C# module by module, checked against `tests/fixtures/` and `tests/test_helper.py`.
 
 ## Build (Windows)
 
     dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
+    python -m PyInstaller --noconfirm --onedir --console --name subscrub-core --distpath helper-dist ^
+        --exclude-module PySide6 --exclude-module tkinter --hidden-import send2trash run_core.py
+    xcopy /e /i helper-dist\subscrub-core winui-out\core
     winui-out\SubScrub.exe
 
-Unpackaged and self-contained: the output folder runs as it is, with nothing else to install. CI (`winui` job in
-`.github/workflows/build.yml`) builds it on every push and attaches the folder as `SubScrub-WinUI`.
+Unpackaged and self-contained: the output folder runs as it is. FFmpeg and MKVToolNix are found the same way as the
+Qt app finds them. Without `core\subscrub-core.exe`, a build run from a source checkout starts `python -m
+subscrub.helper` in the repository instead (or `SUBSCRUB_CORE`, a full command line). CI (`winui` job in
+`.github/workflows/build.yml`) builds both on every push and attaches the folder as `SubScrub-WinUI`.
 
-## Screenshots
+## Scripted QA and screenshots
 
-    SubScrub.exe --shots <folder> --theme dark|light [--size 1920x1080] [--no-mica]
+    SubScrub.exe --shots <folder> --library <copy of samples\library> --theme dark|light [--size 1920x1080] [--no-mica]
 
-Saves every screen twice: `01-files-dark.png` is WinUI's own render of the window (the S4 page shows where Mica would
-be), `screen-01-files-dark.png` is a capture of the real screen (Mica, caption buttons, acrylic). Also writes
-`timings-dark.txt`: how long Settings takes to open. CI attaches them as `winui-screenshots`.
+Drives the real app on a copy of the sample library (`python -m tests.make_samples --library`) with a throwaway
+settings file and a stand-in for TMDB: adds the videos, opens Review (to check, changes, a kept line, look closer,
+regular subtitles only), picks a title, opens Settings, then saves everything, answering each question. Every screen
+is saved twice: `02-files-dark.png` is WinUI's own render of the window (the S4 page where Mica would be),
+`screen-02-files-dark.png` a capture of the real screen. It also writes `timings-dark.txt` and `qa-dark.json`, which
+`python tools/winui_qa_check.py qa-dark.json samples/library` checks with ffprobe and mkvmerge. CI runs it in both
+themes and at 1000x680, and pushes the images to the throwaway branch `winui-screenshots`.
 
 ## Generated files
 
@@ -34,9 +51,11 @@ weight) come from `python tools/make_winui.py`. Change the sources and run it ag
 
 ## Layout
 
-- `App.xaml`, `MainWindow.xaml`: the window (backdrop, top bar, Files, Review, footer).
+- `App.xaml`, `MainWindow.xaml`: the window (backdrop, top bar, welcome, Files, Review, footer, the drop veil).
 - `Themes/Controls.xaml`: fonts, text styles and an S4 template for every control used (buttons, segmented tabs,
-  settings nav, switch, text and password fields, the dialog).
-- `Controls/`: `SolarIcon`, `Segmented`, `OptionRow`, `FileRow`.
-- `Views/SettingsDialog`: Settings as a `ContentDialog`, built once and reused.
-- `Models/`: the sample files and the settings model. `Services/`: theme lookups, DPI, the screenshot mode.
+  settings nav, switch, text and password fields, the line list, the dialog).
+- `Controls/`: `SolarIcon`, `Segmented`, `OptionRow`, `FileRow`, `Parts.cs` (badge, banner, track tile, edit row,
+  choice button), `Preview.cs` (caption screen, timeline, the before/after list).
+- `Views/`: `SettingsDialog` (built once and reused) and `Dialogs.cs` (questions, the title picker, the log).
+- `Models/Views.cs`: what the engine sends back. `Services/`: `Core` (the engine process), `Job` (the engine ends
+  with the app), theme lookups, DPI, the QA run (`Shots`) and the XAML check (`Diagnose`).

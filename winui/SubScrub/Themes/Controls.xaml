@@ -219,10 +219,11 @@
                                 </VisualState>
                             </VisualStateGroup>
                         </VisualStateManager.VisualStateGroups>
-                        <Rectangle x:Name="Glow" Margin="-16,-8,-16,-16" IsHitTestVisible="False">
+                        <!-- wide and soft: starts fading at the button's middle and is gone well past its edge -->
+                        <Rectangle x:Name="Glow" Margin="-26,-14,-26,-22" Opacity="0.6" IsHitTestVisible="False">
                             <Rectangle.Fill>
                                 <RadialGradientBrush Center="0.5,0.56" RadiusX="0.5" RadiusY="0.5" GradientOrigin="0.5,0.56">
-                                    <GradientStop Offset="0.45" Color="{ThemeResource S4PrimaryGlowColor}" />
+                                    <GradientStop Offset="0.15" Color="{ThemeResource S4PrimaryGlowColor}" />
                                     <GradientStop Offset="1" Color="{ThemeResource S4PrimaryGlowEdgeColor}" />
                                 </RadialGradientBrush>
                             </Rectangle.Fill>
@@ -358,7 +359,7 @@
                                 <VisualState x:Name="Checked">
                                     <VisualState.Setters>
                                         <Setter Target="Sel.Opacity" Value="1" />
-                                        <Setter Target="Glow.Opacity" Value="1" />
+                                        <Setter Target="Glow.Opacity" Value="0.45" />
                                         <Setter Target="Tint.Opacity" Value="0" />
                                         <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource S4BtnFgBrush}" />
                                     </VisualState.Setters>
@@ -367,10 +368,10 @@
                                 <VisualState x:Name="Indeterminate" />
                             </VisualStateGroup>
                         </VisualStateManager.VisualStateGroups>
-                        <Rectangle x:Name="Glow" Margin="-6,-4,-6,-8" Opacity="0" IsHitTestVisible="False">
+                        <Rectangle x:Name="Glow" Margin="-16,-10,-16,-14" Opacity="0" IsHitTestVisible="False">
                             <Rectangle.Fill>
                                 <RadialGradientBrush>
-                                    <GradientStop Offset="0.55" Color="{ThemeResource S4NavGlowColor}" />
+                                    <GradientStop Offset="0.1" Color="{ThemeResource S4NavGlowColor}" />
                                     <GradientStop Offset="1" Color="{ThemeResource S4ClearColor}" />
                                 </RadialGradientBrush>
                             </Rectangle.Fill>
@@ -667,6 +668,44 @@
                                    TextTrimming="CharacterEllipsis"
                                    IsHitTestVisible="False" />
                     </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ================================================================ Review's line list -->
+
+    <!-- one line of the before/after list: neutral hover and selection fills (never crimson), no check marks or
+         selection pill -->
+    <Style x:Key="S4CueItem" TargetType="ListViewItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="4,0,4,0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListViewItem">
+                    <ListViewItemPresenter
+                        ContentTransitions="{TemplateBinding ContentTransitions}"
+                        Control.IsTemplateFocusTarget="True"
+                        FocusVisualMargin="{TemplateBinding FocusVisualMargin}"
+                        SelectionCheckMarkVisualEnabled="False"
+                        SelectionIndicatorVisualEnabled="False"
+                        CheckMode="Overlay"
+                        Background="Transparent"
+                        PointerOverBackground="{ThemeResource S4BgHoverBrush}"
+                        PointerOverForeground="{ThemeResource S4TextBrush}"
+                        SelectedBackground="{ThemeResource S4BgSelBrush}"
+                        SelectedForeground="{ThemeResource S4TextBrush}"
+                        SelectedPointerOverBackground="{ThemeResource S4BgSelBrush}"
+                        PressedBackground="{ThemeResource S4BgSelBrush}"
+                        SelectedPressedBackground="{ThemeResource S4BgSelBrush}"
+                        CornerRadius="8"
+                        ContentMargin="{TemplateBinding Padding}"
+                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

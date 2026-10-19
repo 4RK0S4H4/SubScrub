@@ -7,8 +7,8 @@ using SubScrub.Models;
 namespace SubScrub.Views;
 
 /// <summary>Everything that's set once: how files are saved, names and tracks, the default edits, appearance.
-/// The same sections, labels and hints as the Python app's Settings (subscrub/ui/dialogs.py). Stage 1: the values
-/// live in memory only.</summary>
+/// The same sections, labels and hints as the Python app's Settings (subscrub/ui/dialogs.py). The engine saves them
+/// where the Qt app keeps its own, so both apps share one set of settings and one TMDB key.</summary>
 public sealed partial class SettingsDialog : ContentDialog
 {
     private static readonly (string Key, string Label, string Icon)[] Sections =
@@ -100,8 +100,21 @@ public sealed partial class SettingsDialog : ContentDialog
         edits.Add(LabelledRow("Song Lyrics", _lyrics));
         _pages["edits"] = Page("Default Edits", [.. edits]);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 10, 0, 0) };
-        tools.Children.Add(new Button { Content = "Tools and Paths…", Style = Theme.Style("S4Button") });
-        tools.Children.Add(new Button { Content = "Activity Log", Style = Theme.Style("S4Button") });
+        var toolsButton = new Button { Content = "Tools and Paths…", Style = Theme.Style("S4Button") };
+        var logButton = new Button { Content = "Activity Log", Style = Theme.Style("S4Button") };
+        // one dialog at a time: Settings closes (unsaved changes are dropped, like Cancel) and the other opens
+        toolsButton.Click += (_, _) =>
+        {
+            OnCancel(this, new RoutedEventArgs());
+            _win.DispatcherQueue.TryEnqueue(async () => await _win.ShowToolsAsync());
+        };
+        logButton.Click += (_, _) =>
+        {
+            OnCancel(this, new RoutedEventArgs());
+            _win.DispatcherQueue.TryEnqueue(async () => await _win.ShowLogAsync());
+        };
+        tools.Children.Add(toolsButton);
+        tools.Children.Add(logButton);
         _pages["look"] = Page("Appearance and Safety",
             LabelledRow("Theme", _theme), Hint("Automatic follows Windows' light or dark setting, live."),
             _confirmRow, _updateRow, tools);
@@ -149,8 +162,10 @@ public sealed partial class SettingsDialog : ContentDialog
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
-        Store(_win.Settings);
+        var values = _win.Settings.Copy();
+        Store(values);
         Hide();
+        _win.DispatcherQueue.TryEnqueue(async () => await _win.SaveSettingsAsync(values));
     }
 
     private void OnCancel(object sender, RoutedEventArgs e)
@@ -165,24 +180,24 @@ public sealed partial class SettingsDialog : ContentDialog
 
     private void OnRestore(object sender, RoutedEventArgs e)
     {
-        var defaults = new AppSettings { Theme = _theme.Value, TmdbKey = _tmdbKey.Password, TrackName = "" };
+        var defaults = new SettingsView { Theme = _theme.Value, TmdbKey = _tmdbKey.Password, TrackName = "" };
         Load(defaults);
     }
 
     // ================================================================ values
 
-    private void Load(AppSettings s)
+    private void Load(SettingsView s)
     {
         _videoMode.Value = s.VideoMode;
         _defaultRow.IsOn = s.MakeDefault;
         _keepRow.IsOn = s.KeepSdh;
         _trackName.Text = s.TrackName;
-        _recycleRow.IsOn = s.OneFilePerVideo;
+        _recycleRow.IsOn = s.RecycleSub;
         _subMode.Value = s.SubMode;
-        _renameRow.IsOn = s.Rename;
+        _renameRow.IsOn = s.RenameOn;
         _yearRow.IsOn = s.NameYear;
         _tmdbKey.Password = s.TmdbKey;
-        _langsRow.IsOn = s.DropLanguages;
+        _langsRow.IsOn = s.DropLangs;
         foreach (var (key, row) in _ruleRows)
             row.IsOn = s.Rules.TryGetValue(key, out var on) && on;
         _lyrics.Value = s.Lyrics;
@@ -192,18 +207,18 @@ public sealed partial class SettingsDialog : ContentDialog
         UpdateHints();
     }
 
-    private void Store(AppSettings s)
+    private void Store(SettingsView s)
     {
         s.VideoMode = _videoMode.Value;
         s.MakeDefault = _defaultRow.IsOn;
         s.KeepSdh = _keepRow.IsOn;
-        s.TrackName = _trackName.Text;
-        s.OneFilePerVideo = _recycleRow.IsOn;
+        s.TrackName = _trackName.Text.Trim();
+        s.RecycleSub = _recycleRow.IsOn;
         s.SubMode = _subMode.Value;
-        s.Rename = _renameRow.IsOn;
+        s.RenameOn = _renameRow.IsOn;
         s.NameYear = _yearRow.IsOn;
-        s.TmdbKey = _tmdbKey.Password;
-        s.DropLanguages = _langsRow.IsOn;
+        s.TmdbKey = _tmdbKey.Password.Trim();
+        s.DropLangs = _langsRow.IsOn;
         foreach (var (key, row) in _ruleRows)
             s.Rules[key] = row.IsOn;
         s.Lyrics = _lyrics.Value;
