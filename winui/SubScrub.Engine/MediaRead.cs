@@ -411,6 +411,7 @@ public static partial class Media
                 Title = title, Default = disp.GetValueOrDefault("default") != 0, Forced = disp.GetValueOrDefault("forced") != 0,
                 HearingImpaired = disp.GetValueOrDefault("hearing_impaired") != 0, Disposition = disp,
                 Cleaned = (tags.GetValueOrDefault("subscrub") ?? "").ToLowerInvariant() == "cleaned",
+                CleanedBy = tags.GetValueOrDefault("subscrub_cleaned") ?? "",
             });
         }
         var duration = PyFloat(fmt["duration"]) ?? 0.0;

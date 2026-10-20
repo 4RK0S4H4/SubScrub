@@ -43,6 +43,8 @@ public sealed class Item
     public Dictionary<int, string> Overrides { get; set; } = [];   // cue index -> "orig" | "clean" chosen in Review
     public bool Reviewed { get; set; }
     public bool Force { get; set; }                      // clean even though the track isn't SDH (the user asked)
+    public string? Marked { get; set; }                  // cleaned by this SubScrub version earlier: shown as Done, not read
+    public bool ReadAnyway { get; set; }                 // the user opened a marked file in Review: read and clean it again
     public List<SubTrack> Sidecars { get; set; } = [];   // subtitle files sitting next to the video
     public HashSet<string> Dropped { get; set; } = [];   // subtitle files the user dropped along with the video
     public Dictionary<string, List<string>> Locked { get; set; } = [];   // file this save would change -> programs

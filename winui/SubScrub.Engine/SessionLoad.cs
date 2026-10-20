@@ -17,6 +17,7 @@ public sealed partial class Session
     public void Start(string version)
     {
         Tools = Media.FindTools(Cfg.Tools);
+        Media.AppVersion = version;
         Changed = review =>
         {
             if (review)
@@ -359,6 +360,25 @@ public sealed partial class Session
             var cached = ReadCache.Get(path, reader);
             var probe = cached?.Probe ?? Media.ProbeText(tools, path, Log);
             var info = Media.ParseProbe(path, probe);
+            if (!it.ReadAnyway && info.Subs.FirstOrDefault(t => t.CleanedBy.Length > 0) is { } mark)
+            {
+                // cleaned by SubScrub before (and unchanged since, or the tag would be gone): Done, nothing to read
+                lock (Lock)
+                {
+                    if (Item(uid) == null || cancel.IsCancellationRequested)
+                        return;
+                    it.Info = info;
+                    it.Marked = mark.CleanedBy;
+                    it.State = "done";
+                    it.Output = path;
+                    it.DoneText = $"Already cleaned by SubScrub {mark.CleanedBy}";
+                    it.Progress = -1;
+                    Log($"{it.Name}: already cleaned by SubScrub {mark.CleanedBy} (track {mark.Index})");
+                    Changed(uid == ReviewUid);
+                    PumpNames();
+                }
+                return;
+            }
             var paths = new Dictionary<int, string>();
             var docs = new Dictionary<int, SubtitleDoc>();
             var errors = new Dictionary<int, string>();

@@ -95,8 +95,9 @@ don't try `git push` of a tag.)
   `MediaSave.cs` (FFmpeg/MKVToolNix: probing, extracting, remuxing, the verified swap, the Recycle Bin rule, the
   tidy-up), `WinApi.cs` (Recycle Bin, Restart Manager "files in use", drive type and SSD detection),
   `Naming.cs`/`NamingMatch.cs`/`Tmdb.cs` (TMDB, Windows-safe names, rename history in
-  `%LOCALAPPDATA%\SubScrub\renames.jsonl`), `Batch.cs` (track picking, sidecar pairing), `Session*.cs` (the file
-  list, verdicts, Review, questions at save time, the batch save with up to two at once, reading), `Commands.cs`
+  `%LOCALAPPDATA%\SubScrub\renames.jsonl`), `ReadCache.cs` (files already read, `%LOCALAPPDATA%\SubScrub\cache`), `Batch.cs` (track picking, sidecar pairing), `Session*.cs` (the file
+  list, verdicts, Review, questions at save time, the batch save and reading with up to two at once, the
+  SUBSCRUB_CLEANED mark), `Commands.cs`
   (the JSON commands the window calls), `Py*.cs` (the Python string, sorting and path rules the answers were frozen
   with: keep them).
 - `winui/SubScrub.Engine.Parity/`: the golden check. `winui/SubScrub.Engine.Tests/`: engine tests and `--qa-check`.

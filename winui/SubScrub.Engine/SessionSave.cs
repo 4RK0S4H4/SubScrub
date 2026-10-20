@@ -357,6 +357,7 @@ public sealed partial class Session
         public HashSet<string> Dropped = [];
         public string Policy = "";
         public string? NewName;
+        public bool ReadAnyway;
         public HashSet<string> Touched = [];             // files this save reads, replaces, removes or renames to
         public string Drive = "";
         public bool Ssd;
@@ -395,7 +396,7 @@ public sealed partial class Session
                 {
                     Uid = i.Uid, Path = i.Path, Kind = i.Kind, Info = i.Info, Docs = i.Docs, SdhCounts = i.SdhCounts, Sel = i.Sel,
                     Manual = i.Manual, Opts = i.Opts, Overrides = new(i.Overrides), Force = i.Force || (single && i.Kind == "subtitle"),
-                    Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i),
+                    Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i), ReadAnyway = i.ReadAnyway,
                     Touched = [.. FilesTouched(i).Append(i.Path).Append(NewName(i) is { Length: > 0 } nn ? PyPath.Join(PyPath.Dir(i.Path), nn) : "")
                         .Where(x => x.Length > 0).Select(PyPath.Key)],
                 });
@@ -646,6 +647,11 @@ public sealed partial class Session
                                         && (it.Info.Subs.Any(t => t.TextBased) || Media.FindSidecars(it.Path).Count > 0));
         if (fresh)
             BatchLoad(it, uid, prog, cancel);
+        if (fresh && !job.ReadAnyway && it.Info?.Subs.FirstOrDefault(t => t.CleanedBy.Length > 0) is { } mark)
+        {
+            TidyOrSkip(it, uid, null, $"already cleaned by SubScrub {mark.CleanedBy}", prog, cfg, cancel);
+            return;
+        }
         if (!it.Manual || it.Sel is not { } s || !it.Docs.ContainsKey(s))
             it.Sel = Batch.PickTrack(it, cfg.Pref);
         var track = it.Track();

@@ -581,6 +581,8 @@ public sealed partial class Session
         {
             var outName = !string.IsNullOrEmpty(it.Output) ? PyPath.Name(it.Output) : "";
             var same = !string.IsNullOrEmpty(it.Output) && PyPath.NormCase(it.Output) == PyPath.NormCase(it.Path);
+            if (it.Marked != null)
+                return (it.DoneText, "Done", "done", true);         // Review reads it again for a clean by hand
             if (it.DoneText.Length > 0)
                 return (it.DoneText, "Saved", "done", false);
             var what = same && it.Kind == "video" ? "Cleaned track saved into the video"

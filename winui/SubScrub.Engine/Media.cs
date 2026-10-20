@@ -34,6 +34,7 @@ public sealed class SubTrack
     public string External { get; set; } = "";      // a separate subtitle file next to the video ("" = inside it)
     public bool Cleaned { get; set; }               // a track SubScrub wrote on an earlier run (tagged SUBSCRUB=cleaned)
 
+    public string CleanedBy { get; set; } = "";     // SUBSCRUB_CLEANED: the version that cleaned it (4.0 on)
     public bool FromSubscrub => Cleaned || (Title ?? "").ToLowerInvariant().EndsWith("(dialogue only)", StringComparison.Ordinal);
 
     public bool TextBased => Media.TextCodecs.ContainsKey(Codec);

@@ -526,9 +526,15 @@ public static partial class Media
         return note;
     }
 
-    private const string TagsXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                                   + "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>\n"
-                                   + "<Simple><Name>SUBSCRUB</Name><String>cleaned</String></Simple></Tag></Tags>\n";
+    /// <summary>The version that writes SUBSCRUB_CLEANED on a cleaned MKV track (set when the engine starts).</summary>
+    public static string AppVersion { get; set; } = "4";
+
+    /// <summary>The cleaned track's tags: SUBSCRUB=cleaned (finds it again) and SUBSCRUB_CLEANED=&lt;version&gt;, the mark
+    /// that shows the file as Done the next time it's added (decided by the user 2026-10-20).</summary>
+    private static string TagsXml => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                     + "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>\n"
+                                     + "<Simple><Name>SUBSCRUB</Name><String>cleaned</String></Simple>\n"
+                                     + $"<Simple><Name>SUBSCRUB_CLEANED</Name><String>{System.Security.SecurityElement.Escape(AppVersion)}</String></Simple></Tag></Tags>\n";
 
     internal static readonly Regex GuiProgress = new(@"\A#GUI#progress (\d+)%");
 
@@ -711,7 +717,7 @@ public static partial class Media
             {
                 cmd.AddRange([$"-disposition:s:{j}", opts.MakeDefault ? "default" : "0",
                               $"-metadata:s:s:{j}", $"language={lang}", $"-metadata:s:s:{j}", $"title={name}",
-                              $"-metadata:s:s:{j}", "SUBSCRUB=cleaned"]);
+                              $"-metadata:s:s:{j}", "SUBSCRUB=cleaned", $"-metadata:s:s:{j}", $"SUBSCRUB_CLEANED={AppVersion}"]);
                 if (outKind == "mp4")
                     cmd.AddRange([$"-metadata:s:s:{j}", $"handler_name={name}"]);
             }

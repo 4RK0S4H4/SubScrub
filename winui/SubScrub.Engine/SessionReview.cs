@@ -13,6 +13,16 @@ public sealed partial class Session
         lock (Lock)
         {
             var it = Item(uid) ?? throw new InvalidOperationException("That file isn't in the list any more.");
+            if (it.Marked != null && !Busy())
+            {
+                // a file SubScrub cleaned before: read it now, like any other, so it can be cleaned again by hand
+                it.Marked = null;
+                it.ReadAnyway = true;
+                it.State = "queued";
+                it.DoneText = "";
+                it.Output = null;
+                PumpLoader();
+            }
             if (ReviewUid is { } was && was != uid && Item(was) is { } left)
                 Release(left);                           // a saved file leaves the screen
             ReviewUid = uid;

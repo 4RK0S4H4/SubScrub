@@ -500,7 +500,7 @@ internal static class Tests
 
     /// <summary>Saves one video the way the Save button does (rewrite in place, best guess for uncertain lines).
     /// Returns the item's state and message ("told" when the save didn't start and only said why).</summary>
-    private static (string State, string Message) SaveOne(string path, Tools? tools = null)
+    private static (string State, string Message) SaveOne(string path, Tools? tools = null, bool review = false)
     {
         var settings = Path.Combine(Tmp, "settings-" + Guid.NewGuid().ToString("N") + ".json");
         var store = new FileStore(settings);
@@ -518,6 +518,16 @@ internal static class Tests
             s.Tools = tools;
         s.Add([path]);
         Check(s.WaitIdle(300), "reading finished");
+        if (s.Items[0].Marked != null)
+        {
+            if (!review)
+            {
+                s.Close();
+                return ("marked", s.Items[0].DoneText);
+            }
+            s.Review(s.Items[0].Uid, "changes");         // opening it in Review reads it for a clean by hand
+            Check(s.WaitIdle(300), "reading finished");
+        }
         var answers = new JsonObject();
         for (var k = 0; k < 8; k++)
         {
@@ -608,13 +618,16 @@ internal static class Tests
 
     public static void TestAwkwardFileNameWithoutMkvmerge()
     {
-        // as in test_edge.py: a copy of the file once saved, so FFmpeg's own path is used as well
+        // as in test_edge.py: a copy of the file once saved, so FFmpeg's own path is used as well. The copy carries
+        // SubScrub's mark, so it shows as Done; opened in Review it's read and saved again
         var p = EdgeCases()["It's & 100% [Rock] Café 🎬"];
         Check(SaveOne(p).State == "done");
         var copy = Path.Combine(NewDir("copy2"), Path.GetFileName(p));
         File.Copy(p, copy);
         p = copy;
-        var (state, msg) = SaveOne(p, new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe });
+        var ffmpegOnly = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe };
+        Check(SaveOne(p, ffmpegOnly) is ("marked", var why) && why.StartsWith("Already cleaned by SubScrub", StringComparison.Ordinal), "the saved copy is Done");
+        var (state, msg) = SaveOne(p, ffmpegOnly, review: true);
         Check(state is "done" or "skipped" or "asked", $"{state}: {msg}");
         Check(Leftovers(Path.GetDirectoryName(p)!).Count == 0);
     }
@@ -1275,5 +1288,38 @@ internal static class Tests
                 File.Delete(TmdbDiskCache.FilePath);
             TmdbDiskCache.Reload();
         }
+    }
+
+    // ================================================================ files SubScrub cleaned show as Done (#51)
+
+    public static void TestCleanedFilesShowAsDoneRightAway()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run python -m tests.make_samples --library first");
+        var (_, first) = SaveAndLook(lib, "marked", true);
+        var dir = Path.Combine(Tmp, "marked");
+        var saved = first.Items.Where(i => i.State == "done" && PyPath.Suffix(i.Output!) == ".mkv" && i.DoneText.StartsWith("Cleaned track", StringComparison.Ordinal))
+            .Select(i => i.Output!).ToList();             // a file only renamed has no cleaned track, so no mark
+        first.Close();
+        Check(saved.Count >= 3, "videos were saved");
+        foreach (var v in saved)
+            Check(Media.Probe(ToolsFound, v).Subs.Any(t => t.CleanedBy == "tests"), $"{Path.GetFileName(v)} carries SUBSCRUB_CLEANED");
+        var s = new Session(new FileStore(Path.Combine(Tmp, "marked-again.json")));
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var marked = s.Items.Where(i => saved.Contains(i.Path)).ToList();
+        Check(marked.Count == saved.Count && marked.All(i => i.State == "done" && i.Marked == "tests"), "every cleaned video is Done");
+        Check(marked.All(i => i.Docs.Count == 0), "and nothing was extracted or cleaned");
+        var row = s.FilesView()["rows"]!.AsArray().First(r => r!["uid"]!.GetValue<int>() == marked[0].Uid)!;
+        Check(row["badge"]?.GetValue<string>() == "Done" || row.ToJsonString().Contains("\"Done\""), row.ToJsonString());
+        Check(row.ToJsonString().Contains("Already cleaned by SubScrub tests"), row.ToJsonString());
+        // Review reads it, so it can be cleaned again by hand
+        s.Review(marked[0].Uid, "changes");
+        Check(s.WaitIdle(300));
+        Check(marked[0].State == "ready" && marked[0].Marked == null && marked[0].Docs.Count > 0, $"read for Review: {marked[0].State}");
+        s.Close();
     }
 }
