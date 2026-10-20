@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from subscrub import media
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures"
@@ -27,8 +27,27 @@ def _runner(tools):
     return lambda cmd: subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL, timeout=180, **kw)
 
 
+def find_tools() -> SimpleNamespace:
+    """FFmpeg and MKVToolNix on PATH, or where Windows installers put them (the app's own search is in C# now)."""
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    extra = [os.path.join(pf, "MKVToolNix"), os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "MKVToolNix"),
+             os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "chocolatey", "bin"),
+             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links")] if os.name == "nt" else []
+
+    def find(name):
+        found = shutil.which(name)
+        if found:
+            return found
+        for d in extra:
+            p = os.path.join(d, name + ".exe")
+            if os.path.isfile(p):
+                return p
+        return None
+    return SimpleNamespace(ffmpeg=find("ffmpeg"), ffprobe=find("ffprobe"), mkvmerge=find("mkvmerge"))
+
+
 def main():
-    tools = media.find_tools()
+    tools = find_tools()
     if not tools.ffmpeg:
         sys.exit("FFmpeg not found - run install-tools.bat first.")
     if "--library" in sys.argv:
