@@ -1,14 +1,16 @@
 # Tests and the Windows build, on GitHub's Windows machines.
-#   - every push and pull request: run the tests, build SubScrub.exe, attach it to the run as an artifact
-#   - a tag like v2.7.3: also publish a GitHub Release with SubScrub.exe (the user downloads from there)
-#   - "Run workflow" on main with a version typed in (e.g. 2.7.3): does the same and creates the tag itself
+#   - every push and pull request: run the tests, build the Qt SubScrub.exe (3.x), attach it to the run as an artifact
+#   - "Run workflow" on main with a version typed in (e.g. 4.0.1), or a vX.Y.Z tag: job "release" builds the native
+#     app and its installer, checks the version matches winui/SubScrub/SubScrub.csproj, creates the tag and publishes
+#     the GitHub Release with SubScrub-Setup.exe and the app as a zip (the user downloads from there)
 #   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
 #     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media), and
 #     the checks that the C# engine gives exactly what the Python one gives (tools/cleaner_parity.py: the cleaner;
 #     tools/engine_parity.py: the file list, Review and the save questions); the winui job runs them on Windows too
 #   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it (its engine is the C# port in
-#     winui/SubScrub.Engine, built in), check the engine against the Python one and run its tests, then run its scripted QA on the generated sample library in both themes and a
+#     winui/SubScrub.Engine, built in), check the engine against the Python one and run its tests, then run its
+#     scripted QA on the generated sample library in both themes and a
 #     small window: add, review, pick a title, save, and check the saved videos with ffprobe and mkvmerge. Attaches
 #     the app folder ("SubScrub-WinUI") and the screenshots ("winui-screenshots"). Generated media only.
 name: build
@@ -30,6 +32,7 @@ permissions:
 
 jobs:
   windows:
+    if: "!startsWith(github.ref, 'refs/tags/') && inputs.version == ''"
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -128,25 +131,6 @@ jobs:
           path: |
             dist/SubScrub.exe
             dist/SubScrub-Setup.exe
-
-      - name: Check the version matches before releasing
-        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
-        shell: pwsh
-        run: |
-          if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Releases can only be started from main" }
-          $v = python -c "import subscrub; print(subscrub.__version__)"
-          if ($v.Trim() -ne "${{ inputs.version }}") { throw "Typed version ${{ inputs.version }} does not match subscrub/__init__.py ($v)" }
-
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
-          target_commitish: ${{ github.sha }}
-          files: |
-            dist/SubScrub.exe
-            dist/SubScrub-Setup.exe
-          generate_release_notes: true
 
   # the same tests on Linux: fast, and a second opinion on paths and encodings
   linux:
@@ -425,3 +409,67 @@ jobs:
           # two runs on one commit (push and pull_request) race here; the other one's images are the same
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" winui-screenshots \
             || echo "::warning::another run updated winui-screenshots first"
+
+  # a release: "Run workflow" on main with the version typed in (or a vX.Y.Z tag). Builds the native app (WinUI) and
+  # its installer, checks the version matches winui/SubScrub/SubScrub.csproj, and publishes the GitHub Release with
+  # SubScrub-Setup.exe (what the in-app update downloads) and the app folder as a zip
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Check the version
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$proj = Get-Content winui\SubScrub\SubScrub.csproj
+          $v = ($proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1).Trim()
+          $want = if ("${{ inputs.version }}" -ne "") { "${{ inputs.version }}" } else { "${{ github.ref_name }}".TrimStart('v') }
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.ref }}" -ne "refs/heads/main") { throw "Releases can only be started from main" }
+          if ($v -ne $want) { throw "Typed version $want does not match winui/SubScrub/SubScrub.csproj ($v)" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build the app
+        shell: pwsh
+        run: |
+          dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          if (-not (Get-ChildItem winui-out\*.pri)) { throw "no .pri file in the output: the XAML could not load" }
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" "/DSourceDir=..\winui-out" installer\SubScrub-WinUI.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          Compress-Archive -Path winui-out\* -DestinationPath "dist-winui\SubScrub-${{ steps.version.outputs.version }}-win-x64.zip"
+
+      - name: Smoke-test the installed app starts
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "SubScrubRelease"
+          $p = Start-Process dist-winui\SubScrub-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir" -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "the installer did not finish" }
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          Start-Sleep -Seconds 10
+          $run = @(Get-Process SubScrub -ErrorAction SilentlyContinue)
+          if ($run.Count -eq 0) { throw "the installed SubScrub did not start" }
+          $run | Stop-Process -Force
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: SubScrub ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            dist-winui/SubScrub-Setup.exe
+            dist-winui/SubScrub-${{ steps.version.outputs.version }}-win-x64.zip
+          generate_release_notes: true

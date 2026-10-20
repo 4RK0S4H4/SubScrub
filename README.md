@@ -201,6 +201,18 @@ it: remove the torrent afterwards (keep the files), or use *New File* to keep th
 
 ## What's new
 
+### 4.0
+
+**SubScrub is now a native Windows app.** The window and the engine were rewritten in C# with WinUI 3, in the same S4
+Glass look. It cleans, renames and saves exactly as 3.0 did: every rule, wording, question and saved file was
+checked against the old engine, side by side, on thousands of lines and over a hundred real saves.
+
+- **One native app, and quicker.** No Python inside any more, and Windows' own controls (Mica, scrolling, keyboard,
+  touch). On the test machine it opens in about half a second.
+- **Installs over 3.x.** Same place, Start-menu entry and settings (your TMDB key stays). 3.x offers the update itself.
+- **Small extras.** The window opens where you left it. Tools shows each tool's version and can install FFmpeg and
+  MKVToolNix for you with winget.
+
 ### 3.0.1
 
 **Mica fix.** With the Windows 11 Mica backdrop turned on, the top bar now lets Mica show through, so it matches the

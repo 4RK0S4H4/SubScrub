@@ -23,13 +23,16 @@ whole development team.
   request or bug as a GitHub issue (`bug` / `enhancement`), reply with the links, and stop. Don't build, test or
   screenshot while only logging. They decide when and what to tackle. When they say "go" or "do the batch"
   (or name specific issues), do exactly those in one branch and PR, run the checks once, merge, close the issues
-  and send the release link. They also say when to release.
+  and send the release link.
+- **Releases (decided by the user 2026-10-20).** Claude publishes releases without asking. Big updates (like the
+  native app) get a new major version (4.0); a release that fixes a major bug gets the next minor number (4.1, 4.2);
+  smaller changes get a patch number (4.0.1). The user still decides what gets built ("log it" vs "go").
 - **"future plan" issues are never part of a batch.** An issue labelled `future plan` is an idea to discuss and
   design, not work to do. "Go" on all open issues, "do the batch" and similar skip it. Only build one when the user
   names it and says to build it.
 - **Branch, PR, merge yourself.** Work on a branch, open a PR and let the `build` workflow pass. Small verified
   changes you merge without asking. SubScrub is a Windows desktop app, so there is no GitHub Pages link: after a
-  release, give them the GitHub Release link (that is where they download `SubScrub.exe`).
+  release, give them the GitHub Release link (that is where they download `SubScrub-Setup.exe`).
 - **Ask before deciding what's theirs to decide.** Cleaning rules, naming formats and anything that changes their
   files are confirmed with them and recorded in `docs/OPEN-ITEMS.md`. Never silently change a rule below.
   Ask with the multiple-choice question tool when there is one: a short round (at most four questions), the
@@ -79,9 +82,11 @@ build.bat                                                       # local Windows 
 CI: `.github/workflows/build.yml` runs the tests and builds `SubScrub.exe` on `windows-latest` for every push and
 PR (the exe is attached to the run). A second job on Linux makes the sample library and attaches screenshots of
 every screen in both themes (artifact "screenshots"). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
-To ship a version: bump `subscrub/__init__.py`, add a "What's new" entry to README.md, merge, then start the
-`build` workflow on main with the version typed in (Actions, "Run workflow", or the `actions_run_trigger` tool).
-It checks the version matches `__init__.py`, creates the tag and publishes the Release. (Cloud Claude Code sessions
+To ship a version (4.0 on, the native app): set `<Version>` in `winui/SubScrub/SubScrub.csproj`, add a "What's new"
+entry to README.md, merge, then start the `build` workflow on main with the version typed in (Actions, "Run
+workflow", or the `actions_run_trigger` tool). Job `release` checks the version matches the csproj, builds the app
+and `SubScrub-Setup.exe`, creates the tag and publishes the Release. (The Qt app's `subscrub/__init__.py` stays on
+3.x; it is no longer released.) (Cloud Claude Code sessions
 can't push tags, so don't try `git push` of a tag.)
 
 ## Layout
