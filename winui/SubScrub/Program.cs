@@ -20,10 +20,10 @@ public static partial class Program
         WinRT.ComWrappersSupport.InitializeComWrappers();
         if (!args.Contains("--shots") && !args.Contains("--new-window") && HandedOver())
             return 0;
-        Application.Start(_ =>
+        Application.Start(p =>
         {
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
-            _ = new App();
+            new App();
         });
         return 0;
     }
