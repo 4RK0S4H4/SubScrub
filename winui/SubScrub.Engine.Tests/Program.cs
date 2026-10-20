@@ -1237,4 +1237,43 @@ internal static class Tests
         Check(log3.Any(l => l.Contains("rewriting the file instead")), "fell back to a remux");
         Check(t3.SequenceEqual(t2) && l3.SequenceEqual(l2), "and saved the same file");
     }
+
+    // ================================================================ TMDB answers kept between runs (#50)
+
+    public static void TestTmdbAnswersAreKeptBetweenRuns()
+    {
+        var key = "0123456789abcdef0123456789abcdef";
+        if (File.Exists(TmdbDiskCache.FilePath))
+            File.Delete(TmdbDiskCache.FilePath);
+        TmdbDiskCache.Reload();
+        var start = DateTimeOffset.UtcNow;
+        TmdbDiskCache.Now = () => start;
+        try
+        {
+            var calls = 0;
+            Tmdb Client() => new(key) { UseDiskCache = true, Opener = (_, _) => { calls++; return (200, "{\"results\": [{\"id\": 7}], \"id\": 7}"); } };
+            Client().SearchMovie("Dune");
+            Client().Movie(7);
+            Check(calls == 2, "asked TMDB the first time");
+            Check(!File.ReadAllText(TmdbDiskCache.FilePath).Contains(key), "the API key is never stored");
+            TmdbDiskCache.Reload();                                   // a new run
+            Check(Client().SearchMovie("Dune").Count == 1 && Client().Movie(7).Count > 0 && calls == 2, "the next run uses the kept answers");
+            TmdbDiskCache.Now = () => start.AddDays(8);
+            Client().SearchMovie("Dune");
+            Client().Movie(7);
+            Check(calls == 3, "searches are kept 7 days, details 30");
+            TmdbDiskCache.Now = () => start.AddDays(31);
+            Client().Movie(7);
+            Check(calls == 4, "details expire after 30 days");
+            Check(new Tmdb(key) { Opener = (_, _) => { calls++; return (200, "{\"results\": []}"); } }.SearchMovie("Dune").Count == 0 && calls == 5,
+                  "a test's own opener doesn't read the kept answers");
+        }
+        finally
+        {
+            TmdbDiskCache.Now = () => DateTimeOffset.UtcNow;
+            if (File.Exists(TmdbDiskCache.FilePath))
+                File.Delete(TmdbDiskCache.FilePath);
+            TmdbDiskCache.Reload();
+        }
+    }
 }

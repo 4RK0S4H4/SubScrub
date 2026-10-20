@@ -20,6 +20,11 @@ public sealed class Tmdb : ITmdb
     /// <summary>For the tests: waits between tries.</summary>
     public Action<double> Sleep { get; set; } = s => Thread.Sleep(TimeSpan.FromSeconds(s));
 
+    /// <summary>Keep answers on disk between runs (TmdbDiskCache). Off by default when a test supplies the Opener.</summary>
+    public bool? UseDiskCache { get; set; }
+
+    private bool DiskCache => UseDiskCache ?? Opener == null;
+
     public Tmdb(string key, double timeout = 12.0)
     {
         _key = Py.Strip(key ?? "");
@@ -63,6 +68,12 @@ public sealed class Tmdb : ITmdb
             if (_cache.TryGetValue(cacheKey, out var hit))
                 return hit;
         }
+        if (DiskCache && TmdbDiskCache.Get(cacheKey) is { } stored)
+        {
+            lock (_cache)
+                _cache[cacheKey] = stored.Data;
+            return stored.Data;
+        }
         JsonNode? data = null;
         string? last = null;
         var ok = false;
@@ -104,6 +115,8 @@ public sealed class Tmdb : ITmdb
             throw new TmdbError($"Couldn't reach TMDB ({last}).");
         lock (_cache)
             _cache[cacheKey] = data;
+        if (DiskCache)
+            TmdbDiskCache.Put(cacheKey, data);
         return data;
     }
 
@@ -198,4 +211,83 @@ public sealed class FakeTmdb : ITmdb
       [96074, 4, []], [96075, 4, []],
       [231003, 1, [{"episode_number": 2, "name": "Ocean", "runtime": 58}]]]}
     """;
+}
+
+/// <summary>TMDB's answers kept between runs in %LOCALAPPDATA%\SubScrub\tmdb-cache.json: searches for 7 days, movie and
+/// season details for 30. Keyed by the request without the API key, which is never stored.</summary>
+public static class TmdbDiskCache
+{
+    private static readonly object Gate = new();
+    private static JsonObject? _entries;
+
+    public static Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
+
+    public static string FilePath
+    {
+        get
+        {
+            var b = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (string.IsNullOrEmpty(b))
+                b = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+            return Path.Combine(b, "SubScrub", "tmdb-cache.json");
+        }
+    }
+
+    private static TimeSpan Life(string key) => key.StartsWith("/search/", StringComparison.Ordinal) ? TimeSpan.FromDays(7) : TimeSpan.FromDays(30);
+
+    private static bool Fresh(string key, JsonNode? entry) =>
+        entry?["t"] is JsonValue t && t.TryGetValue<long>(out var at) && Now() - DateTimeOffset.FromUnixTimeSeconds(at) < Life(key);
+
+    private static JsonObject Entries()
+    {
+        if (_entries != null)
+            return _entries;
+        try
+        {
+            var all = JsonNode.Parse(File.ReadAllText(FilePath)) as JsonObject ?? [];
+            _entries = new JsonObject(all.Where(kv => Fresh(kv.Key, kv.Value)).Select(kv => KeyValuePair.Create(kv.Key, kv.Value?.DeepClone())));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            _entries = [];
+        }
+        return _entries;
+    }
+
+    public sealed record Stored(JsonNode? Data);
+
+    public static Stored? Get(string key)
+    {
+        lock (Gate)
+        {
+            var e = Entries()[key];
+            return Fresh(key, e) ? new Stored(e!["data"]?.DeepClone()) : null;
+        }
+    }
+
+    public static void Put(string key, JsonNode? data)
+    {
+        lock (Gate)
+        {
+            var all = Entries();
+            all[key] = new JsonObject { ["t"] = Now().ToUnixTimeSeconds(), ["data"] = data?.DeepClone() };
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                var tmp = FilePath + ".part";
+                File.WriteAllText(tmp, all.ToJsonString());
+                File.Move(tmp, FilePath, true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    /// <summary>Forgets what was loaded (tests switch LOCALAPPDATA).</summary>
+    public static void Reload()
+    {
+        lock (Gate)
+            _entries = null;
+    }
 }
