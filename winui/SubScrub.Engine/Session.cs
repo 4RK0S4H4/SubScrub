@@ -311,6 +311,17 @@ public sealed partial class Session
     public void Log(string msg)
     {
         var line = DateTime.Now.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "  " + msg;
+        if (_sink.Value is { } sink)                     // a save running beside another: written in list order later
+        {
+            lock (sink)
+                sink.Add(line);
+            return;
+        }
+        WriteLog(line);
+    }
+
+    private void WriteLog(string line)
+    {
         lock (LogLines)
         {
             LogLines.Add(line);
@@ -388,7 +399,7 @@ public sealed partial class Session
             {
                 foreach (var it in Items)
                 {
-                    if (it.Opts == null && it.Loaded)
+                    if (it.Opts == null && it.Loaded && !it.Released)   // a released one works it out when read
                         ComputeResult(it);
                 }
             }
@@ -515,6 +526,16 @@ public sealed partial class Session
     // ================================================================ results
 
     public void ComputeResult(Item it) => it.Result = it.Sel != null ? Batch.CleanItem(it, Cfg.Defaults) : null;
+
+    public static bool ReleaseSaved { get; set; } = true;                // off only to compare against (tests)
+
+    /// <summary>A saved file's tracks and cleaning are freed until something reads them again (Item.Release). The
+    /// cleaning comes back with the defaults of that moment, as ComputeResult would have given it.</summary>
+    public void Release(Item it)
+    {
+        if (ReleaseSaved && it.State == "done")
+            it.Release(x => x.Sel != null ? Batch.CleanItem(x, Cfg.Defaults) : null);
+    }
 
     // ================================================================ verdicts
 

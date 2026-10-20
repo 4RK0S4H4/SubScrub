@@ -440,21 +440,37 @@ def is_network_path(path: str | Path) -> bool:
         return False
 
 
-def recycle(path: str | Path, log: Log | None = None) -> str:
-    """Send a file to the Recycle Bin (or delete it where there is none). Returns what happened."""
+KEPT = "kept in its folder"
+
+
+def trash(path: str | Path, log: Log | None = None) -> str | None:
+    """Send a file SubScrub no longer needs to the Recycle Bin. It is never deleted: if the Recycle Bin can't take
+    it (network drives have none), it stays where it is. Returns None when it went, otherwise why it was kept."""
     path = Path(path)
     if is_network_path(path):
-        os.remove(path)
-        return "deleted (network drives have no Recycle Bin)"
-    try:
-        from send2trash import send2trash
-        send2trash(str(path))
-        return "moved to the Recycle Bin"
-    except Exception as e:
-        if log:
-            log(f"Recycle Bin unavailable for {path.name}: {e}")
-        os.remove(path)
-        return "deleted (Recycle Bin unavailable)"
+        why = "network drives have no Recycle Bin"
+    else:
+        try:
+            from send2trash import send2trash
+            send2trash(str(path))
+            return None
+        except Exception as e:  # noqa: BLE001
+            if not os.path.exists(path):         # Windows reported a problem but the file did go
+                if log:
+                    log(f"Recycle Bin reported {e!r} for {path.name}, but the file was moved.")
+                return None
+            why = "the Recycle Bin couldn't take it"
+            if log:
+                log(f"Recycle Bin unavailable for {path.name}: {e}")
+    if log:
+        log(f"Kept {path} ({why})")
+    return why
+
+
+def recycle(path: str | Path, log: Log | None = None) -> str:
+    """trash() as words for a save note: "moved to the Recycle Bin" or "kept in its folder (why)"."""
+    why = trash(path, log)
+    return "moved to the Recycle Bin" if why is None else f"{KEPT} ({why})"
 
 
 # ============================================================================ leftovers of an interrupted save
@@ -844,8 +860,10 @@ def save(tools: Tools, info: MediaInfo, track: SubTrack, cleaned_text: str, fmt:
             final = unique_path(final)
         note = "Subtitle file saved next to the video."
         if same:
-            note = f"“{src_file.name}” replaced with the cleaned version (old one {recycle(src_file, log)})."
-        final.write_text(cleaned_text, encoding="utf-8-sig", newline="")
+            note = f"“{src_file.name}” replaced with the cleaned version. " \
+                   f"{_replace_text_file(src_file, final, cleaned_text, log)}"
+        else:
+            final.write_text(cleaned_text, encoding="utf-8-sig", newline="")
         if log:
             log(f"Wrote {final}")
         if not same:
@@ -969,12 +987,18 @@ def _save_subtitle_source(tools, info, text, fmt, opts, lang, name, on_progress,
             res.note += f" “{src.name}” {recycle(src, log)}."
         return res
     target = output_path(info, opts, fmt)
-    if opts.mode == "replace":
-        what = recycle(src, log)                 # old SDH version goes to the Recycle Bin first
-        target.write_text(text, encoding="utf-8-sig", newline="")
-        return SaveResult(str(target), f"Old version {what}.")
+    if opts.mode == "replace":                   # the cleaned file takes the old one's place, like a video does
+        return SaveResult(str(target), _replace_text_file(src, target, text, log))
     target.write_text(text, encoding="utf-8-sig", newline="")
     return SaveResult(str(target), "Saved next to the original.")
+
+
+def _replace_text_file(src: Path, final: Path, text: str, log: Log | None) -> str:
+    """Replace a subtitle file with its cleaned version the safe way videos are replaced (_swap_in): the new text is
+    written first, and if the old file can't go to the Recycle Bin nothing is changed."""
+    work = src.with_name(f"{src.stem}{TMP_MARK}{final.suffix}")
+    work.write_text(text, encoding="utf-8-sig", newline="")
+    return _swap_in(src, work, final, log)
 
 
 def _remux(tools, info, track, text, fmt, opts, lang, name, on_progress, cancel, log, drop=None) -> SaveResult:

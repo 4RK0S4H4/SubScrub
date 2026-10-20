@@ -12,7 +12,29 @@ public sealed class Item
     public int Uid { get; set; } = Interlocked.Increment(ref _ids);
     public string State { get; set; } = "queued";        // queued probing reading ready saving done skipped failed
     public MediaInfo? Info { get; set; }
-    public Dictionary<int, SubtitleDoc> Docs { get; set; } = [];
+    private Dictionary<int, SubtitleDoc>? _docs = [];
+    private Dictionary<int, byte[]>? _packed;                // the docs while released (see Release)
+    private CleanResult? _result;
+    private Func<Item, CleanResult?>? _rebuild;
+
+    /// <summary>The subtitle tracks read, by track index. A released item unpacks them on first use.</summary>
+    public Dictionary<int, SubtitleDoc> Docs
+    {
+        get
+        {
+            if (_docs == null)
+            {
+                _docs = _packed!.ToDictionary(kv => kv.Key, kv => SubFormats.Unpack(kv.Value));
+                _packed = null;
+            }
+            return _docs;
+        }
+        set
+        {
+            _docs = value;
+            _packed = null;
+        }
+    }
     public Dictionary<int, string> DocErrors { get; set; } = [];
     public Dictionary<int, int> SdhCounts { get; set; } = [];   // track index -> lines the default rules would clean
     public int? Sel { get; set; }
@@ -29,7 +51,40 @@ public sealed class Item
     public string Message { get; set; } = "";
     public string? Output { get; set; }
     public int Cleaned { get; set; }
-    public CleanResult? Result { get; set; }
+    /// <summary>The cleaning of the picked track. A released item works it out again on first use.</summary>
+    public CleanResult? Result
+    {
+        get
+        {
+            if (_rebuild is { } rebuild)
+            {
+                _rebuild = null;
+                _result = rebuild(this);
+            }
+            return _result;
+        }
+        set
+        {
+            _result = value;
+            _rebuild = null;
+        }
+    }
+
+    /// <summary>True while the docs and the cleaning are packed away (a saved file nobody is looking at).</summary>
+    public bool Released => _packed != null || _rebuild != null;
+
+    /// <summary>Frees the parsed tracks and the cleaning once a file is saved: the tracks are kept packed (a small
+    /// compressed copy, exact to the byte) and both come back as they were the next time anything reads them.
+    /// rebuild works the cleaning out again (Session.ComputeResult).</summary>
+    public void Release(Func<Item, CleanResult?> rebuild)
+    {
+        if (_docs == null || _rebuild != null)
+            return;
+        _packed = _docs.ToDictionary(kv => kv.Key, kv => SubFormats.Pack(kv.Value));
+        _docs = null;
+        _result = null;
+        _rebuild = rebuild;
+    }
     public TitleMatch? Match { get; set; }                    // what TMDB says this video is
     public object? NamePick { get; set; }                // a Choice the user picked, "keep" (don't rename) or null
     public string NameState { get; set; } = "";          // "" | looking | done | error | nokey

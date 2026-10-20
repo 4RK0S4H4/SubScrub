@@ -23,7 +23,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- publish: code compiled ahead of time (a faster start), and the framework and Windows projections trimmed to
+         what SubScrub uses (a smaller installer). "partial" trims only libraries made for it; SubScrub and its engine
+         stay whole, and System.Text.Json may still read the engine's replies by reflection -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Program.cs has the Main: it hands a second start's paths to the window already open -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -274,6 +274,7 @@ class Session:
         self._saving = False
         self.batch_total = self.batch_pos = 0
         self.batch_counts: dict = {}
+        self.batch_kept = 0                         # files the Recycle Bin couldn't take, left in their folders
         self.save_status: tuple[str, float] = ("", -1.0)
         # the notifier: one files view per burst of changes
         self._dirty = threading.Event()
@@ -574,7 +575,10 @@ class Session:
                 continue
             try:
                 if action == "remove" and lo.original:
-                    media.recycle(lo.path, self.log)
+                    why = media.trash(lo.path, self.log)
+                    if why is not None:
+                        failed.append([lo.name, f"Kept: {why}"[:60]])
+                        continue
                     self.log(f"Moved the unfinished copy {lo.path} to the Recycle Bin")
                 elif action == "restore" and not lo.original:
                     new = media.restore_leftover(lo)
@@ -1576,6 +1580,7 @@ class Session:
             self._save_cancel = threading.Event()
             self.batch_total, self.batch_pos = len(jobs), 0
             self.batch_counts = {"done": 0, "skipped": 0, "failed": 0, "held": 0}
+            self.batch_kept = 0
             self.save_status = ("Starting…", 0.0)
             self.status_msg = ("", "")
             self._saver = threading.Thread(target=self._run_batch, args=(jobs, cfg, self._save_cancel), daemon=True,
@@ -1742,6 +1747,7 @@ class Session:
     def _job_done(self, uid: int, payload: dict):
         with self.lock:
             self.batch_counts["done"] += 1
+            self.batch_kept += payload["note"].count(media.KEPT)
             it = self.item(uid)
             if it is None:
                 return
@@ -1802,17 +1808,19 @@ class Session:
             if c["failed"]:
                 parts.append(f"{c['failed']} failed")
             summary = ", ".join(parts) or "nothing saved"
+            kept = (f" Kept {plural(self.batch_kept, 'old subtitle file')} the Recycle Bin couldn't take: hover a "
+                    "file to see where.") if self.batch_kept else ""
             tell = None
             if cancelled:
-                self.status_msg = (f"Stopped: {summary}.", "bad" if c["failed"] else "")
+                self.status_msg = (f"Stopped: {summary}.{kept}", "bad" if c["failed"] else "")
             elif c["failed"]:
-                self.status_msg = (f"Finished with problems: {summary}. Hover a file to see why.", "bad")
+                self.status_msg = (f"Finished with problems: {summary}. Hover a file to see why.{kept}", "bad")
             else:
                 single = self.batch_total == 1 and c["done"] == 1
                 it = next((i for i in self.items if i.state == "done" and i.output == self.last_output), None) \
                     if single else None
                 self.status_msg = (f"Saved “{os.path.basename(it.output)}”. {it.message}".strip() if it
-                                   else f"Done: {summary}.", "good" if c["done"] else "")
+                                   else f"Done: {summary}.{kept}", "good" if c["done"] else "")
             if c["failed"] and self.batch_total == 1:
                 it = next((i for i in self.items if i.state == "failed"), None)
                 if it:

@@ -110,6 +110,87 @@ public static class WinApi
         return long.MaxValue;
     }
 
+    // ================================================================ which disk a file is on, and whether it's an SSD
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool GetVolumePathNameW(string file, StringBuilder volume, int size);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(IntPtr device, uint code, byte[] input, int inputSize, byte[] output, int outputSize,
+                                               out int returned, IntPtr overlapped);
+
+    private const uint IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400, IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2D1080;
+
+    /// <summary>The physical disk a file is on (two partitions of one disk give the same key) and whether it is a
+    /// solid-state drive. ("", false) when that can't be told: a network or removable drive, or no answer.</summary>
+    public static (string Key, bool Ssd) DriveOf(string path)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path);
+            if (!OperatingSystem.IsWindows())
+                return LinuxDriveOf(full);
+            if (full.StartsWith(@"\\", StringComparison.Ordinal))
+                return ("", false);
+            var vol = new StringBuilder(300);
+            if (!GetVolumePathNameW(full, vol, vol.Capacity))
+                return ("", false);
+            var root = vol.ToString().TrimEnd('\\') + "\\";
+            if (GetDriveTypeW(root) != 3)                       // DRIVE_FIXED only
+                return ("", false);
+            var h = CreateFileW(@"\\.\" + root.TrimEnd('\\'), 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);   // no access needed, share read/write
+            if (h == new IntPtr(-1))
+                return ("", false);
+            try
+            {
+                var key = root.ToUpperInvariant();
+                var num = new byte[12];                         // STORAGE_DEVICE_NUMBER
+                if (DeviceIoControl(h, IOCTL_STORAGE_GET_DEVICE_NUMBER, [], 0, num, num.Length, out _, IntPtr.Zero))
+                    key = "disk" + BitConverter.ToUInt32(num, 4);
+                var query = new byte[12];                       // STORAGE_PROPERTY_QUERY: StorageDeviceSeekPenaltyProperty
+                BitConverter.GetBytes(7).CopyTo(query, 0);
+                var seek = new byte[12];                        // DEVICE_SEEK_PENALTY_DESCRIPTOR
+                if (!DeviceIoControl(h, IOCTL_STORAGE_QUERY_PROPERTY, query, query.Length, seek, seek.Length, out var got, IntPtr.Zero) || got < 9)
+                    return (key, false);
+                return (key, seek[8] == 0);                     // IncursSeekPenalty false: an SSD
+            }
+            finally
+            {
+                CloseHandle(h);
+            }
+        }
+        catch (Exception)
+        {
+            return ("", false);
+        }
+    }
+
+    /// <summary>Linux (the checks in CI): the block device under the file and /sys's "rotational" flag.</summary>
+    private static (string Key, bool Ssd) LinuxDriveOf(string full)
+    {
+        var mounts = File.ReadAllLines("/proc/self/mountinfo").Select(l => l.Split(' ')).Where(f => f.Length > 4)
+            .Where(f => full == f[4] || full.StartsWith(f[4].TrimEnd('/') + "/", StringComparison.Ordinal))
+            .MaxBy(f => f[4].Length);
+        if (mounts == null)
+            return ("", false);
+        var sys = $"/sys/dev/block/{mounts[2]}";
+        if (!Directory.Exists(sys))
+            return ("", false);
+        var dev = new DirectoryInfo(sys).ResolveLinkTarget(true)?.FullName ?? sys;
+        var queue = Path.Combine(dev, "queue", "rotational");
+        if (!File.Exists(queue))
+        {
+            dev = Path.GetDirectoryName(dev) ?? dev;            // a partition: the disk is the folder above
+            queue = Path.Combine(dev, "queue", "rotational");
+        }
+        if (!File.Exists(queue))
+            return ("", false);
+        return (Path.GetFileName(dev), File.ReadAllText(queue).Trim() == "0");
+    }
+
     // ================================================================ files in use (Restart Manager)
 
     [StructLayout(LayoutKind.Sequential)]

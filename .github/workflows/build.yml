@@ -265,6 +265,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "build failed" }
           if (-not (Get-ChildItem winui-out\*.pri)) { throw "no .pri file in the output: the XAML could not load" }
           Get-ChildItem winui-out\*.pri, winui-out\SubScrub.exe | Format-Table Name, Length
+          $size = (Get-ChildItem winui-out -Recurse -File | Measure-Object Length -Sum).Sum
+          Write-Host ("App folder: {0:N1} MB in {1} files" -f ($size / 1MB), (Get-ChildItem winui-out -Recurse -File).Count)
 
       - uses: actions/download-artifact@v4
         with:
@@ -362,6 +364,29 @@ jobs:
           if ($run.Count -eq 0) { throw "the installed SubScrub did not start" }
           $run | Stop-Process -Force
           Start-Sleep -Seconds 2
+          # Explorer's right-click entry, per user, for videos, subtitle files and folders
+          $menu = @('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.srt', '.ass', '.ssa', '.vtt' | ForEach-Object { "HKCU:\Software\Classes\SystemFileAssociations\$_\shell\SubScrub" }) + 'HKCU:\Software\Classes\Directory\shell\SubScrub'
+          foreach ($k in $menu) {
+            if (-not (Test-Path "$k\command")) { throw "no right-click entry at $k" }
+            $cmd = (Get-Item "$k\command").GetValue('')
+            if ($cmd -ne "`"$dir\SubScrub.exe`" `"%1`"") { throw "wrong command at ${k}: $cmd" }
+            if ((Get-Item $k).GetValue('') -ne 'Clean subtitles with SubScrub') { throw "wrong menu text at $k" }
+          }
+          # one window: a second start (what Explorer does for each selected file) hands its file over and quits
+          $log = Join-Path $env:RUNNER_TEMP "engine-single.log"
+          $first = Start-Process "$dir\SubScrub.exe" -ArgumentList '--log', "`"$log`"" -PassThru
+          Start-Sleep -Seconds 10
+          $video = (Get-ChildItem samples\library\Blade.Runner*.mkv | Select-Object -First 1).FullName
+          $second = Start-Process "$dir\SubScrub.exe" -ArgumentList "`"$video`"" -PassThru
+          $null = $second.Handle
+          if (-not $second.WaitForExit(30000)) { throw "a second SubScrub didn't hand its file to the first one and quit" }
+          for ($i = 0; $i -lt 20 -and -not (Select-String -Path $log -SimpleMatch 'Blade.Runner' -Quiet -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
+          $n = @(Get-Process SubScrub -ErrorAction SilentlyContinue).Count
+          if ($n -ne 1) { throw "expected one SubScrub window, found $n" }
+          if (-not (Select-String -Path $log -SimpleMatch 'Blade.Runner' -Quiet)) { Get-Content $log -ErrorAction SilentlyContinue; throw "the open window didn't add the file it was handed" }
+          Write-Host "A second start handed its file to the open window"
+          Get-Process SubScrub -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
           $code = Run-Quietly dist-winui\SubScrub-Setup.exe $setupArgs                        # an upgrade over the top
           if ($code -ne 0) { throw "second install exit code $code" }
           Start-Sleep -Seconds 6
@@ -371,6 +396,7 @@ jobs:
           for ($i = 0; $i -lt 30 -and (Test-Path "$dir\SubScrub.exe"); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path "$dir\SubScrub.exe") { throw "the uninstaller left SubScrub.exe behind" }
           if (Test-Path $lnk) { throw "the uninstaller left the Start-menu shortcut" }
+          foreach ($k in $menu) { if (Test-Path $k) { throw "the uninstaller left the right-click entry at $k" } }
 
       - uses: actions/upload-artifact@v4
         if: always()

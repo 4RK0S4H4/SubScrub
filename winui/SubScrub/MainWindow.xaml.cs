@@ -132,6 +132,8 @@ public sealed partial class MainWindow : Window
             args.AddRange(["--settings", System.IO.Path.Combine(Shots.Dir, "_settings.json"), "--demo-tmdb",
                            "--log", System.IO.Path.Combine(Shots.Dir, $"engine-{Shots.Theme ?? "x"}.log")]);
         }
+        else if (Environment.GetCommandLineArgs() is var cl && Array.IndexOf(cl, "--log") is var at and > 0 && at + 1 < cl.Length)
+            args.AddRange(["--log", cl[at + 1]]);          // the engine's log to a file too (support, CI's checks)
         try
         {
             Core = Services.Core.Start(DispatcherQueue, args);
@@ -171,9 +173,11 @@ public sealed partial class MainWindow : Window
             ApplyTheme();
             ApplyTools(hello.Tools);
             StartUpdateCheck();
-            var paths = Environment.GetCommandLineArgs().Skip(1).Where(a => File.Exists(a) || Directory.Exists(a)).ToList();
+            var paths = Program.PathsOn(Environment.GetCommandLineArgs().Skip(1));
             if (paths.Count > 0 && Shots.Dir == null)
                 await AddPathsAsync(paths);
+            if (Shots.Dir == null)
+                TakeForwardedPaths();
         }
         catch (Exception e)
         {
@@ -1108,6 +1112,7 @@ public sealed partial class MainWindow : Window
     {
         _saveWait?.TrySetResult(done);
         Saved?.Invoke(done);
+        _ = AddForwardedAfterSaveAsync();                // files handed over during the save
         if (ReviewPage.Visibility == Visibility.Visible)
             await RefreshReviewAsync(keep: true);
         if (done.Tell != null && !_closing)

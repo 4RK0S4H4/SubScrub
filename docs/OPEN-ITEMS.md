@@ -27,6 +27,27 @@ smaller changes a patch (4.0.1). The user still says "log it" vs "go" for what g
 Decided 2026-10-20 (default in the WinUI plan, not objected to): the 4.0 installer installs over 3.x (same AppId,
 install folder and Start-menu name; settings untouched), so 3.x's in-app update moves people to 4.0.
 
+Decided 2026-10-20 (issue #22, in the batch the user said "go" on): SubScrub never deletes a file outright any more.
+- A file SubScrub no longer needs (a subtitle file that is now inside the video, the source `.srt` after embedding,
+  an unfinished copy from an interrupted save) goes to the Recycle Bin. If the Recycle Bin can't take it, it stays
+  where it is: the save note says "kept in its folder (why)", the log gives the full path, and the end-of-batch
+  status says how many were kept. This now includes network drives, which have no Recycle Bin (they used to delete
+  these files). Code: `media.trash` / `Media.Trash`.
+- The file being cleaned (a video, or a subtitle file cleaned in place) is replaced the same safe way videos always
+  were: the new file is written and checked first, then the original goes to the Recycle Bin; if that fails, nothing
+  is changed and the save says why. Before, a subtitle file cleaned in place went to the Recycle Bin first and was
+  deleted if that failed. On a network drive the verified new file replaces the original, as before (there is no
+  Recycle Bin to use, and keeping a second full copy of every video on a NAS would double its size).
+- Still true and unchanged: Windows itself may delete instead of recycling a file too big for the Recycle Bin; the
+  "Rewrite in place?" question says so. **(ask)** whether SubScrub should ask Windows to warn first (a Windows
+  prompt mid-batch) or keep it as is.
+
+Decided 2026-10-20 (same batch): saving runs two files at once when that's faster and safe: an SSD takes two at a
+time, two different disks one each; a spinning disk, a network drive or a drive Windows can't identify takes one at
+a time. Two saves never touch the same file or rename target at once, and the log, the rename history and the
+results read in list order as if the files had been saved one by one. Starting SubScrub again (or Explorer's
+right-click entry on several files) adds the files to the window already open instead of opening a second window.
+
 ## Install and update (built in batch 3, not yet released)
 
 - **Installer** `installer/SubScrub.iss` (Inno Setup, built in CI as `dist/SubScrub-Setup.exe` and attached to the
