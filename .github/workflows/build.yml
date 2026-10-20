@@ -5,7 +5,8 @@
 #   - every push and pull request: the whole test suite again on Linux (job "linux")
 #   - every push and pull request: screenshots of every screen and dialog in both themes, on Linux, attached to the
 #     run as the "screenshots" artifact for the visual check (generated sample videos only, never real media), and
-#     the check that the C# engine cleans exactly like the Python one (tools/cleaner_parity.py)
+#     the checks that the C# engine gives exactly what the Python one gives (tools/cleaner_parity.py: the cleaner;
+#     tools/engine_parity.py: the file list, Review and the save questions); the winui job runs them on Windows too
 #   - every push and pull request: the new WinUI 3 app in winui/ (job "winui"): build it with its engine
 #     (subscrub-core.exe, PyInstaller), then run its scripted QA on the generated sample library in both themes and a
 #     small window: add, review, pick a title, save, and check the saved videos with ffprobe and mkvmerge. Attaches
@@ -213,7 +214,9 @@ jobs:
       # the C# engine (winui/SubScrub.Engine) must clean exactly like the Python one: every recorded test call,
       # the fixtures and every sample track under each option, compared line by line
       - name: C# engine parity
-        run: python tools/cleaner_parity.py --library samples/library
+        run: |
+          python tools/cleaner_parity.py --library samples/library
+          python tools/engine_parity.py --library samples/library
 
       - name: Screenshots
         env:
@@ -288,6 +291,15 @@ jobs:
         with:
           name: sample-library
           path: samples/library
+
+      # the same checks with Windows' own path rules (case, separators) and file system
+      - name: C# engine parity on Windows
+        shell: pwsh
+        run: |
+          python tools/cleaner_parity.py --library samples/library
+          if ($LASTEXITCODE -ne 0) { throw "the C# cleaner differs from the Python one" }
+          python tools/engine_parity.py --library samples/library
+          if ($LASTEXITCODE -ne 0) { throw "the C# engine differs from the Python one" }
 
       # the runner's screen is small; try for 1920x1080 so the on-screen shots aren't cramped
       - name: Screen size

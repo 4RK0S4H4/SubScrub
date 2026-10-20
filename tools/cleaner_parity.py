@@ -204,6 +204,7 @@ def diff(a, b, path="") -> list[str]:
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     argv = sys.argv[1:]
     library = Path(argv[argv.index("--library") + 1]) if "--library" in argv else None
     keep = Path(argv[argv.index("--keep") + 1]) if "--keep" in argv else None

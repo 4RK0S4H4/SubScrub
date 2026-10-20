@@ -36,6 +36,36 @@ public sealed record CleanOptions
             QuoteItalics = G("quote_italics", o.QuoteItalics), MixedCaseLabels = G("mixed_case_labels", o.MixedCaseLabels),
         };
     }
+
+    /// <summary>The Python option names, in the dataclass's order.</summary>
+    public static readonly string[] Keys =
+    [
+        "brackets", "parentheses", "speaker_labels", "music_cues", "lyrics", "lyric_symbols", "dialogue_dashes",
+        "onscreen_text", "ocr_fixes", "sound_words", "quote_italics", "mixed_case_labels",
+    ];
+
+    public bool Get(string key) => key switch
+    {
+        "brackets" => Brackets, "parentheses" => Parentheses, "speaker_labels" => SpeakerLabels,
+        "music_cues" => MusicCues, "lyrics" => Lyrics, "lyric_symbols" => LyricSymbols,
+        "dialogue_dashes" => DialogueDashes, "onscreen_text" => OnscreenText, "ocr_fixes" => OcrFixes,
+        "sound_words" => SoundWords, "quote_italics" => QuoteItalics, "mixed_case_labels" => MixedCaseLabels,
+        _ => throw new ArgumentException($"no option {key}"),
+    };
+
+    public Dictionary<string, bool> ToDict() => Keys.ToDictionary(k => k, Get);
+
+    /// <summary>copy(**changes): unknown names are ignored.</summary>
+    public CleanOptions With(IEnumerable<KeyValuePair<string, bool>> changes)
+    {
+        var d = ToDict();
+        foreach (var (k, v) in changes)
+        {
+            if (d.ContainsKey(k))
+                d[k] = v;
+        }
+        return FromDict(d);
+    }
 }
 
 /// <summary>What happened to one cue. Text null = the cue is removed. Risk 0 routine, 1 worth a glance,
