@@ -1,12 +1,12 @@
 <!--
     S4 Glass for WinUI: fonts, text styles and a template for every control SubScrub uses, so nothing looks like a
-    stock Fluent control. Colours come only from Tokens.xaml (generated from subscrub/ui/theme.py), always through
+    stock Fluent control. Colours come only from Tokens.xaml (the S4 Glass tokens), always through
     ThemeResource so light and dark switch live. Rules (CLAUDE.md "Look"): crimson only on the primary button,
     switches, the selected tab, segment or nav item and things that need checking; hover and selection are soft
     fills, never outlines; keyboard focus shows the system ring (UseSystemFocusVisuals), which appears for
     keyboard focus only.
 
-    Fonts: each Inter weight is its own family (tools/make_winui.py), so set FontFamily, never FontWeight.
+    Fonts: each Inter weight is its own family (Assets/Fonts), so set FontFamily, never FontWeight.
 -->
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"

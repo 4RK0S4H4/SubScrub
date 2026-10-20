@@ -28,6 +28,8 @@ app asks about.
    then **Run anyway**. You'll see this once per version.
 3. SubScrub needs **FFmpeg** (required) and **MKVToolNix** (recommended for MKV files). If they're missing, the top
    bar says so and its **Tools** button installs them for you.
+4. In Explorer, right-click videos, subtitle files or a folder and choose **Clean subtitles with SubScrub**. Several
+   files at once open in one SubScrub window (on Windows 11 it's under **Show more options**).
 
 **Updates:** once a day SubScrub checks for a newer version and, if there is one, shows a quiet banner with
 **Update** and **Later**. Update downloads the installer, checks it, installs it and restarts SubScrub. Nothing is
@@ -160,6 +162,8 @@ Things it handles that trip up simpler tools (all seen in real files):
   original to the Recycle Bin. The check covers the video and audio tracks, the length, the subtitle tracks, the
   **attached fonts, the chapters, and that the cleaned track really holds the cleaned lines**. If anything is off,
   nothing is replaced and you're told why.
+- SubScrub never deletes a file outright. A subtitle file that is now inside the video goes to the Recycle Bin; if
+  the Recycle Bin can't take it (a network drive has none), it stays in its folder and the save says so.
 - A track where cleaning would remove **every line**, or an empty subtitle file, is left alone with a message.
 - Files another program has open can't be rewritten (see below). A path too long for Windows is refused up front.
 - If a save was interrupted (a crash, a power cut), SubScrub offers to move the unfinished
@@ -256,30 +260,23 @@ Older versions are in [docs/HISTORY.md](docs/HISTORY.md).
 
 ## For developers
 
+The app is WinUI 3 (C#, .NET 8) in `winui/`, with its engine in `winui/SubScrub.Engine`. Building the app needs
+Windows; the engine and its checks run on Linux too.
+
 ```
-python -m pip install -r requirements.txt pyinstaller pillow
-python run.py                          # run from source
-python -m tests.test_cleaner           # rule tests and the cleaner corpus (tests/fixtures/corpus.tsv)
-python -m tests.test_pipeline          # end-to-end saves on generated videos (needs ffmpeg + mkvmerge)
-python -m tests.test_edge              # awkward files through the real save path
-python -m tests.test_ui                # contrast, main flows, every dialog (QT_QPA_PLATFORM=offscreen)
-build.bat                              # local build -> dist\SubScrub.exe
+dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out   # the app
+python3 -m tests.make_samples --library      # generated sample videos (FFmpeg), also --edge and plain
+dotnet run --project winui/SubScrub.Engine.Parity -c Release -- golden tests/golden .   # frozen answers
+dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .                        # engine tests
 ```
 
-More in [CLAUDE.md](CLAUDE.md). Every change runs the tests on Windows (with FFmpeg and MKVToolNix) and Linux, builds
-`SubScrub.exe` and `SubScrub-Setup.exe` (Inno Setup, `installer/SubScrub.iss`) and checks that the installer installs,
-starts and uninstalls. The screenshots above come from a generated sample library
-(`python -m tests.make_samples --library`), never from real files. To release: bump `subscrub/__init__.py`, update
-this file, merge, then run the `build` workflow on `main` with the version typed in.
-
-- `subscrub/cleaner.py`: the rules, per-line risk grading, file-level detection (OCR, `Name:` style) and the
-  cross-check against the regular track
-- `subscrub/batch.py`: picking the track to clean (regular first, else SDH), sidecar pairing, rename helpers
-- `subscrub/subformats.py`: SRT / ASS / WebVTT reading and writing
-- `subscrub/media.py`: FFmpeg/MKVToolNix discovery, extraction, remuxing, the safe swap and its checks
-- `subscrub/naming.py`: TMDB lookup, scoring, Windows-safe names, rename history
-- `subscrub/updates.py`: the update check and the installer download
-- `subscrub/ui/`: the PySide6 interface (`main_window.py` Files/Review, `preview.py` the timeline and list)
+SubScrub 1–3 were a Python/Qt app. Its engine was ported to C#, compared side by side on every change, then retired
+in 4.0; everything it answered (every cleaner call its tests made, the sample library under every option, the file
+list, Review, the save questions, 120+ real saves, title matching) is frozen in `tests/golden` and the C# engine is
+checked against it on every push. More in [CLAUDE.md](CLAUDE.md) and [winui/README.md](winui/README.md). Every
+change builds the app and `SubScrub-Setup.exe`, runs the scripted QA in both themes, checks the saved videos, and
+installs, upgrades and uninstalls the installer. The screenshots come from a generated sample library, never from
+real files.
 
 **Testing against your own library:** `tools\extract-subs.ps1` dumps every English text subtitle track from a drive
 (videos are only read):
@@ -288,7 +285,6 @@ this file, merge, then run the `build` workflow on `main` with the version typed
 powershell -ExecutionPolicy Bypass -File tools\extract-subs.ps1 -Root "F:\" -Out "F:\subdump" -MaxPerFolder 3 -AllFrom Movies
 ```
 
-Then `python tools\corpus_check.py F:\subdump` shows what SubScrub would do to each track: its confidence, every line it
-would ask about, and anything that still looks like SDH after cleaning.
+Then add the dump folder in SubScrub: the file list shows what it would do to each track, without saving anything.
 
 Credits: Inter (SIL OFL 1.1, see `assets/fonts/OFL-Inter.txt`); Solar icons by 480 Design (CC BY 4.0).

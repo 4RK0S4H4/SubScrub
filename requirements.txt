@@ -1,2 +1,0 @@
-PySide6-Essentials>=6.7
-Send2Trash>=1.8

@@ -158,7 +158,7 @@ public sealed class CleanResult
 }
 
 /// <summary>Strips hearing-impaired (SDH/CC) annotations from subtitle cues, keeping only dialogue. A port of
-/// subscrub/cleaner.py, kept identical to it: tools/cleaner_parity.py fails on any difference in text, rules, risk
+/// the retired subscrub/cleaner.py, kept identical to its frozen answers: the golden check (tests/golden) fails on any difference in text, rules, risk
 /// or reasons. Change the Python first, then this, and run the parity check.</summary>
 public static class Cleaner
 {

@@ -4,7 +4,7 @@ using SubScrub.Engine;
 
 // cleaner <cases.json> <out.json>
 //   cases: {"cues": [{"text", "opts", "fmt", "ctx"}], "docs": [{"name", "content", "fmt", "opts", "plain"}]}
-//   out:   the same shape as the Python side writes (tools/cleaner_parity.py), one result per case
+//   out:   the same shape as the Python side writes (the retired tools/cleaner_parity.py), one result per case
 internal static class CleanerParity
 {
     public static void Run(string casesPath, string outPath)

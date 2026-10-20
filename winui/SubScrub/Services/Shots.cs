@@ -20,7 +20,7 @@ namespace SubScrub.Services;
 /// title, opens Settings, then saves everything, answering the questions the way a person would. Every screen is
 /// saved twice: "02-files-dark.png" is the window's XAML drawn by WinUI itself (exact pixels, the S4 page where
 /// Mica would be) and "screen-02-files-dark.png" is a capture of the real screen. It also writes qa-dark.json (what
-/// was saved, the final rows, timings) for tools/winui_qa_check.py to verify with ffprobe and mkvmerge, then quits.
+/// was saved, the final rows, timings) for the engine tests' --qa-check to verify with ffprobe and mkvmerge, then quits.
 /// Without --library it only shows the welcome screen and Settings.</summary>
 internal static partial class Shots
 {

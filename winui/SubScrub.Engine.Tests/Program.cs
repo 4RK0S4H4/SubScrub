@@ -4,8 +4,11 @@ using System.Text;
 using System.Text.Json.Nodes;
 using SubScrub.Engine;
 
-// The C# engine's tests: tests/test_swap.py, test_pipeline.py and test_edge.py, on real videos.
+// The C# engine's tests on real videos (the swap, the pipeline, awkward files, saving, memory, two saves at once).
 //   SubScrub.Engine.Tests <repository folder> [name filter]
+//   SubScrub.Engine.Tests --qa-check <qa-dark.json> <pristine sample library>   what the WinUI QA run saved
+if (args.Length == 3 && args[0] == "--qa-check")
+    return QaCheck.Run(args[1], args[2]);
 var root = args.Length > 0 ? Path.GetFullPath(args[0]) : Directory.GetCurrentDirectory();
 var filter = args.Length > 1 ? args[1] : "";
 Tests.Root = root;
