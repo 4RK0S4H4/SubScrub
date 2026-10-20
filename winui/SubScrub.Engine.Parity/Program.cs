@@ -1,4 +1,4 @@
-// The C# engine's side of the parity checks (tools/cleaner_parity.py, tools/engine_parity.py).
+// The C# engine checked against the retired Python engine's answers (tests/golden). The golden mode runs the other two.
 //   parity [cleaner] <cases.json> <out.json>     the cleaner and the subtitle formats
 //   parity session <cases.json> <out.json>       the file list, Review and the save questions
 //   parity golden <tests/golden> <repository> [--update]   against the frozen answers of the retired Python engine

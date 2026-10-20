@@ -1,91 +1,71 @@
-# SubScrub for Windows (WinUI 3), in progress
+# SubScrub for Windows (WinUI 3)
 
-A native rewrite of SubScrub's window in WinUI 3 (C#, .NET 8, Windows App SDK 1.8), keeping the S4 Glass look. The
-Python/Qt app in `subscrub/` is still the one that ships; this folder grows alongside it until it matches. It ships as
-SubScrub 4.0 once it does (until then the csproj says `4.0.0-dev.N`; the Qt app stays on 3.x).
+SubScrub 4: a native Windows app in WinUI 3 (C#, .NET 8, Windows App SDK 1.8) in the S4 Glass look, with its engine
+in C# (`SubScrub.Engine`) running inside the app. It replaced the Python/Qt app of SubScrub 1–3. The Python engine was
+ported here stage by stage, checked side by side until both gave identical answers, then retired (issue #44); its
+answers are frozen in `tests/golden` and the C# engine is checked against them on every push.
 
-**All C# now (stage 6).** The window and the engine are both C#: the engine is `SubScrub.Engine`, a port of the
-Python engine that gives identical results (see below), run inside the app (`Services/Core.cs` answers the same
-commands with the same JSON that `subscrub/helper.py` speaks, so the window's view objects didn't change). No Python
-and no `core` folder ship with it. Working: Add Files, Add Folder, drag and drop, reading with real states and badges,
-`.srt` sidecars, the files-in-use warning, every question at save time (lines it isn't sure about, unsure titles,
-rewriting in place, overwriting), the TMDB title picker, saving with progress, Stop, Review (tracks, edits per file,
-the caption screen, timeline and before/after list with one-row updates), Undo Renames and Settings.
-
-Settings live where the Qt app keeps them (`HKEY_CURRENT_USER\Software\SubScrub\SubScrub`), so both apps share one set
-of settings and one TMDB key.
-
-**Porting the engine to C# (in stages, decided 2026-10-19).** Each stage moves one part of the Python engine into
-`winui/SubScrub.Engine` (plain .NET 8, no Windows dependency, so it builds and is checked on Linux too) and must give
-*identical* results: `python tools/cleaner_parity.py --library samples/library` runs both on every cleaner call the
-test suites make, the fixtures and every sample track under each option, and fails on any difference in text,
-rules, risk, reasons, notes, counts or the saved file. `python tools/engine_parity.py --library samples/library`
-does the same for the rest of the engine: real Python sessions read the sample library, the edge cases, subtitle files
-on their own and a library after a real save, then a script of actions (every view, track changes, kept lines,
-per-file edits, settings, every save question with several sets of answers and programs holding files open) runs on
-both engines from the same state. CI runs both checks on Linux (`screenshots` job) and on Windows (`winui` job).
-
-- Stage 1 (done): the cleaner (`Cleaner.cs`) and the subtitle formats (`SubFormats.cs`), with `Py.cs` for the
-  few Python string rules the results depend on. Change `subscrub/cleaner.py` first, then the port, then run the check.
-- Stage 2 (done): the file list's logic (`Batch.cs`: track picking, sidecars, pairing dropped files, names) and the
-  views of `core.py` (`Session.cs`, `SessionReview.cs`, `SessionSave.cs`: verdicts, rows, the summary, Review, the
-  questions at save time), returning the same JSON the helper sends. `Media.cs` has the track model and file
-  matching, `Naming.cs` the name rendering, `PyLib.cs` Python's formatting, sorting, path rules and difflib.
-- Stage 3 (done): reading files (`MediaRead.cs`: finding FFmpeg/MKVToolNix, running them with progress and Stop,
-  ffprobe, extracting the tracks, unfinished copies) and the session's adding and background reading
-  (`SessionLoad.cs`). The parity check reads the same folders from scratch with both engines.
-- Stage 4 (done): saving (`MediaSave.cs`: mkvmerge and FFmpeg remuxes, the check of the new file, the safe swap,
-  renames and the tidy-up; `WinApi.cs`: the Recycle Bin with undo, the Restart Manager "files in use" check, network
-  drives; the rename history in `Naming.cs`, in the same file and format as Python's so Undo works across both apps)
-  and the batch save in `SessionSave.cs`. The parity check runs 122 saves (every mode, both tools) on two copies of
-  each input and compares the files, tracks, flags and text. `SubScrub.Engine.Tests` ports test_swap, test_pipeline
-  and test_edge: `python -m tests.make_samples`, `python -m tests.make_samples --edge`, then
-  `dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .` (CI runs it on Linux and on Windows).
-- Stage 5 (done): TMDB names (`NamingMatch.cs`: reading release names, scoring, matching and searching; `Tmdb.cs`:
-  the client with a v3 key or v4 token, retries and a cache, and the stand-in used by the scripted QA run) and the
-  session's title lookups (`SessionNames.cs`), plus the settings in the Qt app's registry key with QSettings'
-  escaping (`RegistryStore`). The parity check compares every call `tests/test_naming.py` makes, a corpus of release
-  names and 938 title matches against both stand-ins.
-- Stage 6 (done): the app runs the C# engine in-process (`SubScrub.Engine/Commands.cs`, `Services/Core.cs`); the
-  PyInstaller helper is gone from the WinUI build. The Python helper and its tests stay, since the Qt app still ships
-  on them.
+Settings live where the Qt app kept them (`HKEY_CURRENT_USER\Software\SubScrub\SubScrub`), so an upgrade from 3.x
+keeps them and the TMDB key. The rename history is `%LOCALAPPDATA%\SubScrub\renames.jsonl`, the same file and format
+as before, so Undo Renames works across versions.
 
 ## Build (Windows)
 
     dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
-    winui-out\SubScrub.exe
+    winui-out\SubScrub.exe [files or folders...] [--log <file>]
 
-Unpackaged and self-contained: the output folder runs as it is. FFmpeg and MKVToolNix are found the same way as the
-Qt app finds them. CI (`winui` job in `.github/workflows/build.yml`) builds it on every push and attaches the folder
-as `SubScrub-WinUI`.
+Unpackaged and self-contained, ReadyToRun and trimmed (partial): the output folder runs as it is. Paths on the
+command line are added at start; starting it again while it runs hands the new paths to the open window
+(`Program.cs`), which is how Explorer's "Clean subtitles with SubScrub" (added by the installer) opens several files
+in one window. `installer/SubScrub-WinUI.iss` builds `SubScrub-Setup.exe` (Inno Setup, per user, no admin).
+
+## The engine and its checks
+
+`SubScrub.Engine` is plain .NET 8 with no Windows dependency (the Windows parts are in `WinApi.cs` with Linux
+fallbacks), so it builds and is tested on Linux too.
+
+    python3 -m tests.make_samples --library      # generated sample videos (needs FFmpeg; MKVToolNix for some)
+    python3 -m tests.make_samples --edge
+    python3 -m tests.make_samples
+    dotnet run --project winui/SubScrub.Engine.Parity -c Release -- golden tests/golden .
+    dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .
+
+- The **golden check** replays everything the retired Python engine answered: every cleaner call its tests made, the
+  fixtures and every sample track under each option, five sessions of file-list views, Review and save questions,
+  reading the sample videos, 120+ saves, 938 title matches and the commands end to end. See `tests/golden/README.md`,
+  including how to update the answers when a rule changes on purpose (`--update`).
+- The **engine tests** run on real videos: the safe swap and the Recycle Bin, the pipeline, awkward files, the files
+  in use check, undoing renames, settings in the registry, memory after saving and two saves at once.
+- `SubScrub.Engine.Tests --qa-check <qa.json> <library>` checks what the scripted QA run saved.
 
 ## Scripted QA and screenshots
 
     SubScrub.exe --shots <folder> --library <copy of samples\library> --theme dark|light [--size 1920x1080] [--no-mica]
 
-Drives the real app on a copy of the sample library (`python -m tests.make_samples --library`) with a throwaway
-settings file and a stand-in for TMDB: adds the videos, opens Review (to check, changes, a kept line, look closer,
-regular subtitles only), picks a title, opens Settings, then saves everything, answering each question. Every screen
-is saved twice: `02-files-dark.png` is WinUI's own render of the window (the S4 page where Mica would be),
-`screen-02-files-dark.png` a capture of the real screen. It also writes `timings-dark.txt` and `qa-dark.json`, which
-`python tools/winui_qa_check.py qa-dark.json samples/library` checks with ffprobe and mkvmerge. CI runs it in both
-themes and at 1000x680, and pushes the images to the throwaway branch `winui-screenshots`.
-
-## Generated files
-
-`Themes/Tokens.xaml` (colours from `subscrub/ui/theme.py`), `Controls/SolarData.g.cs` (icons from
-`subscrub/ui/solar.py`) and `Assets/Fonts/*.ttf` (Inter with the open digits and flat-top 3 built in, one family per
-weight) come from `python tools/make_winui.py`. Change the sources and run it again; don't edit the outputs.
+Drives the real app on a copy of the sample library with a throwaway settings file and a stand-in for TMDB: adds the
+videos, opens Review (to check, changes, a kept line, look closer, regular subtitles only), picks a title, opens
+Settings, then saves everything, answering each question. Every screen is saved twice: `02-files-dark.png` is WinUI's
+own render of the window, `screen-02-files-dark.png` a capture of the real screen. It also writes
+`timings-dark.txt` (start, memory, read and save times) and `qa-dark.json`, which `--qa-check` verifies. CI runs it
+in both themes and at 1000x680, and pushes the images to the throwaway branch `winui-screenshots`.
 
 ## Layout
 
-- `App.xaml`, `MainWindow.xaml`: the window (backdrop, top bar, welcome, Files, Review, footer, the drop veil).
-- `Themes/Controls.xaml`: fonts, text styles and an S4 template for every control used (buttons, segmented tabs,
-  settings nav, switch, text and password fields, the line list, the dialog).
+- `Program.cs`: the entry point (one window; a second start forwards its paths). `App.xaml`, `MainWindow.xaml` and
+  its partial files: the window (backdrop, top bar, welcome, Files, Review, footer, the drop veil, updates, window
+  placement, forwarded paths).
+- `Themes/Tokens.xaml` (colours) and `Themes/Controls.xaml` (fonts, text styles and an S4 template for every control
+  used). `Controls/SolarData.g.cs` holds the Solar icons and `Assets/Fonts` Inter with the open digits built in, one
+  family per weight. These were first generated from the Qt app's sources; they are now the sources themselves.
 - `Controls/`: `SolarIcon`, `Segmented`, `OptionRow`, `FileRow`, `Parts.cs` (badge, banner, track tile, edit row,
   choice button), `Preview.cs` (caption screen, timeline, the before/after list).
 - `Views/`: `SettingsDialog` (built once and reused) and `Dialogs.cs` (questions, the title picker, the log).
-- `../SubScrub.Engine/`: the engine in C# (stage 1: `Cleaner.cs`, `SubFormats.cs`); `../SubScrub.Engine.Parity/`
-  runs it for the parity check.
-- `Models/Views.cs`: what the engine sends back. `Services/`: `Core` (the engine process), `Job` (the engine ends
-  with the app), theme lookups, DPI, the QA run (`Shots`) and the XAML check (`Diagnose`).
+- `Models/Views.cs`: what the engine sends back. `Services/`: `Core` (the engine, in-process, answering commands with
+  JSON), theme lookups, DPI, the QA run (`Shots`) and the XAML check (`Diagnose`).
+- `../SubScrub.Engine/`: the engine. `Cleaner.cs` (the rules, risk grading, OCR fixes, names), `SubFormats.cs`
+  (SRT/ASS/VTT), `Media*.cs` (FFmpeg/MKVToolNix: probing, extracting, remuxing, the verified swap), `WinApi.cs`
+  (Recycle Bin, Restart Manager, drives), `Naming*.cs` and `Tmdb.cs` (TMDB names, rename history), `Batch.cs`
+  (track picking, sidecars), `Session*.cs` (the file list, Review, the questions at save time, the batch save,
+  reading), `Commands.cs` (the command protocol), `Py*.cs` (the few Python string, sorting and path rules the
+  results were frozen with).
+- `../SubScrub.Engine.Parity/`: the golden check. `../SubScrub.Engine.Tests/`: the engine tests and `--qa-check`.

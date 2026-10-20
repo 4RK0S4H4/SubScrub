@@ -1,7 +1,8 @@
 """Freeze the Python engine's answers as golden files, so the C# engine can be checked against them once the Python
-engine is gone (issue #44). Run once, on Linux, before the Python engine was removed; kept for the record.
+engine is gone (issue #44). Run once, on Linux, before the Python engine was removed; kept for the record. It needs
+the Python engine (subscrub/ and tools/*_parity.py as of tag v3.0.1 plus the 4.0 batch), so it no longer runs here.
 
-    python tools/freeze_golden.py --library samples/library [--out tests/golden]
+    python tools/freeze_golden.py --library samples/library [--out tests/golden]     (from tools/, back then)
 
 Writes tests/golden/cleaner.json.br and engine.json.br (Brotli-compressed JSON): the cases tools/cleaner_parity.py and
 tools/engine_parity.py built, and what the Python engine answered. The C# side replays them with

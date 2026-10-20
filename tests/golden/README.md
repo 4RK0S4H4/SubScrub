@@ -13,7 +13,7 @@ answers were frozen here so that check keeps running:
   both tools, TMDB title matching on hundreds of names, and the app's commands end to end.
 
 Both are Brotli-compressed JSON: `{"cases": ..., "expected": ...}` (plus `"layout"`, the folders the engine check
-works in). They were made by `tools/freeze_golden.py` in the commit that retired the Python engine, from the
+works in). They were made by `freeze_golden.py` (kept here for the record) just before the Python engine was removed, from the
 hand-written fixtures in `tests/fixtures` and the generated sample videos only. No real media, no one's subtitles.
 
 ## Running the check

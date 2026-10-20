@@ -7,7 +7,7 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>SubScrub</RootNamespace>
     <AssemblyName>SubScrub</AssemblyName>
-    <!-- ships as SubScrub 4.0 once it matches the Qt app (which stays on 3.x); a dev version until then -->
+    <!-- the version a release publishes (CLAUDE.md, "Commands") -->
     <Version>4.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\assets\subscrub.ico</ApplicationIcon>

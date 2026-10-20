@@ -49,7 +49,7 @@ def find_tools() -> SimpleNamespace:
 def main():
     tools = find_tools()
     if not tools.ffmpeg:
-        sys.exit("FFmpeg not found - run install-tools.bat first.")
+        sys.exit("FFmpeg not found: install it (winget install Gyan.FFmpeg) or put it on PATH.")
     if "--library" in sys.argv:
         library(tools)
         return

@@ -204,7 +204,7 @@ public sealed class Config
 }
 
 /// <summary>SubScrub without a window: the file list, Review and the questions at save time, as JSON views the
-/// window draws. A port of subscrub/core.py (Session), kept identical to it: tools/engine_parity.py compares every
+/// window draws. A port of the retired subscrub/core.py (Session), kept identical to it: the golden check (tests/golden) compares every
 /// view. Stage 2: the views; reading, title lookups and the save still come from the Python helper.</summary>
 public sealed partial class Session
 {

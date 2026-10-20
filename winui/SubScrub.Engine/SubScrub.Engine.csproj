@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- SubScrub's engine in C#, ported from the Python one module by module (stage 1: the cleaner and the subtitle
        formats). Plain .NET with no Windows dependency, so it builds and is checked on Linux too:
-       tools/cleaner_parity.py runs it against the Python cleaner and fails on any difference. -->
+       The golden check (tests/golden) compares it with the retired Python engine's answers and fails on any difference. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>SubScrub.Engine</RootNamespace>

@@ -139,7 +139,7 @@ public sealed class TrackPref
 }
 
 /// <summary>Batch bookkeeping that doesn't depend on the window: queue items and picking the right track. A port of
-/// subscrub/batch.py, kept identical to it (tools/engine_parity.py).</summary>
+/// the retired subscrub/batch.py, kept identical to it (the golden check, tests/golden).</summary>
 public static class Batch
 {
     // How "SDH-ish" a track is, independent of the user's toggles: only real SDH annotations count

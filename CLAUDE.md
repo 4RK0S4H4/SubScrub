@@ -1,14 +1,16 @@
 # SubScrub
 
-A Windows desktop app (Python 3.11+, PySide6/Qt) that strips non-dialogue SDH text from subtitle tracks, such as
+A Windows desktop app (WinUI 3, C# / .NET 8, in `winui/`) that strips non-dialogue SDH text from subtitle tracks, such as
 `[door creaks]`, `JOHN:` and `♪ music ♪`. It works on MKV and other videos and on standalone .srt/.ass/.vtt files.
 The cleaned track goes back into the video as the default. If the file has a regular English track, that one is cleaned
 and the SDH track is kept; if only an SDH track exists, it is cleaned and dropped. Optionally it also renames
 videos from TMDB (`The Walking Dead S7 E2.mkv`) and removes other-language subtitle tracks. It never re-encodes
 video. FFmpeg and MKVToolNix do the muxing.
 
-Current version: see `subscrub/__init__.py`. The history of every change is in `README.md`
-("What's new") and `docs/HISTORY.md`.
+Current version: `<Version>` in `winui/SubScrub/SubScrub.csproj`. The history of every change is in `README.md`
+("What's new") and `docs/HISTORY.md`. SubScrub 1–3 were a Python/Qt app; its engine was ported to C#, checked
+side by side, and retired in 4.0 (issue #44). Its answers are frozen in `tests/golden` and the C# engine must keep
+giving them.
 
 ## How we work together
 
@@ -51,80 +53,56 @@ whole development team.
 
 ## Commands
 
+Building the app needs Windows (WinUI); the engine, its checks and the sample videos work on Linux too.
+
 ```
-python -m pip install -r requirements.txt pyinstaller pillow   # dev setup (any OS)
-python run.py                                                   # run the app (Windows for the real thing)
+dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out   # the app (Windows)
+winui-out\SubScrub.exe [files or folders] [--log <file>]
 
-# tests (set QT_QPA_PLATFORM=offscreen on a machine without a display)
-python -m tests.test_cleaner
-python -m tests.test_batch
-python -m tests.test_naming
-python -m tests.test_swap
-python -m tests.test_library
-python -m tests.test_updates                                      # update check and download, no network
-python -m tests.test_ui                                         # contrast (WCAG AA), main flows, every dialog
-python -m tests.test_pipeline                                    # makes its own sample videos (ffmpeg + mkvmerge)
-python -m tests.test_edge                                        # awkward files through the real save path
-python -m tests.test_helper                                      # the WinUI app's engine helper: JSON protocol, parity, a save
-python tools/cleaner_parity.py [--library samples/library]      # the C# engine must clean exactly like the Python one (.NET 8 SDK)
-python tools/engine_parity.py --library samples/library         # ...and read, list, review and save files the same way
-dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .  # the C# engine's own save tests (make_samples, --edge first)
+python3 -m tests.make_samples                 # samples/Sample (SDH test).mkv/.mp4 (needs FFmpeg; the only Python left)
+python3 -m tests.make_samples --library       # samples/library: 6 realistic videos in every state
+python3 -m tests.make_samples --edge          # samples/edge: awkward files
 
-python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
-python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state
-python tools/ui_screenshots.py <out> samples/library dark|light [--save] [--size 1000x680]   # visual-check shots
-python tools/readme_screenshots.py                              # remake docs/screenshots (README) from the sample library
-python tools/make_solar.py <solar.json>                         # regenerate subscrub/ui/solar.py from Iconify's set
-python tools/make_icon.py                                       # regenerate assets/subscrub.ico + .png from logo_pixmap
-build.bat                                                       # local Windows build -> dist\SubScrub.exe
+dotnet run --project winui/SubScrub.Engine.Parity -c Release -- golden tests/golden .     # the frozen answers
+dotnet run --project winui/SubScrub.Engine.Parity -c Release -- golden tests/golden . --update   # a rule changed on purpose
+dotnet run --project winui/SubScrub.Engine.Tests -c Release -- . [name filter]          # engine tests on real videos
+dotnet run --project winui/SubScrub.Engine.Tests -c Release -- --qa-check <qa.json> samples/library
+
+winui-out\SubScrub.exe --shots <out> --library <copy of samples\library> --theme dark|light [--size 1000x680]
 ```
 
-CI: `.github/workflows/build.yml` runs the tests and builds `SubScrub.exe` on `windows-latest` for every push and
-PR (the exe is attached to the run). A second job on Linux makes the sample library and attaches screenshots of
-every screen in both themes (artifact "screenshots"). Pushing a `vX.Y.Z` tag also publishes a GitHub Release with the exe.
-To ship a version (4.0 on, the native app): set `<Version>` in `winui/SubScrub/SubScrub.csproj`, add a "What's new"
+The golden check must pass on every change. When a rule, a wording or a view changes on purpose, run it, read every
+difference, then run it with `--update` and say in the PR what changed (`tests/golden/README.md`).
+
+CI: `.github/workflows/build.yml`. Job `engine` (Linux) makes the sample videos, runs the golden check and the engine
+tests. Job `winui` (Windows) builds the app, runs the engine tests on Windows, runs the scripted QA in both themes and
+a small window and checks the saved videos, then builds `SubScrub-Setup.exe` and installs, upgrades and uninstalls
+it (including the Explorer menu keys and the one-window hand-over). Artifacts: `SubScrub-WinUI-Setup`,
+`SubScrub-WinUI` and `winui-screenshots` (also pushed to the throwaway branch `winui-screenshots`, since cloud sessions
+can't download artifacts). To ship a version: set `<Version>` in `winui/SubScrub/SubScrub.csproj`, add a "What's new"
 entry to README.md, merge, then start the `build` workflow on main with the version typed in (Actions, "Run
 workflow", or the `actions_run_trigger` tool). Job `release` checks the version matches the csproj, builds the app
-and `SubScrub-Setup.exe`, creates the tag and publishes the Release. (The Qt app's `subscrub/__init__.py` stays on
-3.x; it is no longer released.) (Cloud Claude Code sessions
-can't push tags, so don't try `git push` of a tag.)
+and `SubScrub-Setup.exe`, creates the tag and publishes the Release. (Cloud Claude Code sessions can't push tags, so
+don't try `git push` of a tag.)
 
 ## Layout
 
-- `subscrub/cleaner.py`: the cleaning rules, per-line risk grading ("to check"), OCR fixes, `Name:` detection, and
-  a cross-check against the plain subtitle track in the same file.
-- `subscrub/subformats.py`: SRT/ASS/VTT read and write.
-- `subscrub/media.py`: probing, extracting and muxing with FFmpeg/MKVToolNix. Also the safe swap (the new file is
-  verified before the original goes to the Recycle Bin), the "files in use" check (Windows Restart Manager) and
-  the track tidy-up.
-- `subscrub/naming.py`: TMDB lookup and scoring, Windows-safe names, and the rename history used for undo
-  (`%LOCALAPPDATA%\SubScrub\renames.jsonl`).
-- `subscrub/batch.py`: queue items, track picking, sidecar `.srt` pairing, rename helpers.
-- `subscrub/app.py`: entry point. Loads the bundled Inter font.
-- `subscrub/ui/main_window.py`: the window: top bar with tabs, welcome, file list, review (sidebar plus preview),
-  footer.
-- `subscrub/ui/dialogs.py`: every dialog (Settings, the "not sure" choice, title picker, files in use, tools, log,
-  About) and `ask()` / `tell()`, which replace QMessageBox. All are in-window `GlassDialog`s.
-- `subscrub/ui/workers.py`: background threads (load, save, lock check) and small formatting helpers.
-- `subscrub/ui/preview.py`: the caption "screen", the timeline and the before/after list.
-- `subscrub/ui/theme.py`: colour tokens (DARK/LIGHT), the style sheet, fonts, `num_font()`, the title-bar colour.
-- `subscrub/ui/glass.py`: window backdrop (cached), card panels, `GlassDialog`, optional Windows 11 Mica.
-- `subscrub/ui/widgets.py`: painted controls: rows, badges, the segmented control (also the tabs), toggles, track
-  tiles, the settings nav, rounded tooltips (`set_tip`) and menus (`make_menu`), Solar icon drawing.
-- `subscrub/ui/solar.py`: Solar icon SVGs (CC BY 4.0). `subscrub/ui/fonts.py`: Inter as base64 (OFL).
-- `subscrub/core.py`: the Qt window's logic without Qt (file list, verdicts, Review data, questions at save time, the
-  batch save). `subscrub/helper.py`: drives it over JSON lines on stdin/stdout (the protocol the WinUI app's engine
-  answers in-process). Keep `core.py` in step with `ui/main_window.py` and with the C# `Session` when behaviour
-  changes: `tools/engine_parity.py` compares them.
-- `winui/SubScrub.Engine/`: the engine being ported to C# in stages (the cleaner and subtitle formats, then the file
-  list's logic and views). It must match the Python engine exactly (`tools/cleaner_parity.py` and
-  `tools/engine_parity.py`, run in CI on Linux and Windows): a change to a rule, a wording or a view goes into the
-  Python (`cleaner.py`, `batch.py`, `core.py`) and the C# (`Cleaner.cs`, `Batch.cs`, `Session*.cs`) together.
-- `winui/`: the native WinUI 3 rewrite in progress (see `winui/README.md`); the Qt app keeps shipping until it
-  matches. `tools/make_winui.py` regenerates its tokens, icons and fonts from the Python sources;
-  `tools/winui_qa_check.py` checks what its scripted QA run saved.
-- `tests/`: the test suites and fixtures. `tools/`: screenshot driver, Solar generator, corpus checker, PowerShell
-  extractor.
+- `winui/SubScrub/`: the app (see `winui/README.md` for the file-by-file layout). `Program.cs` is the entry point
+  (one window; a second start forwards its paths), `MainWindow*` the window, `Themes/` the S4 tokens and control
+  templates, `Controls/` the painted parts, `Views/` Settings and the dialogs, `Services/Shots.cs` the scripted QA.
+- `winui/SubScrub.Engine/`: the engine. `Cleaner.cs` (cleaning rules, risk grading, OCR fixes, `Name:` detection,
+  the cross-check against the plain track), `SubFormats.cs` (SRT/ASS/VTT), `Media.cs`, `MediaRead.cs`,
+  `MediaSave.cs` (FFmpeg/MKVToolNix: probing, extracting, remuxing, the verified swap, the Recycle Bin rule, the
+  tidy-up), `WinApi.cs` (Recycle Bin, Restart Manager "files in use", drive type and SSD detection),
+  `Naming.cs`/`NamingMatch.cs`/`Tmdb.cs` (TMDB, Windows-safe names, rename history in
+  `%LOCALAPPDATA%\SubScrub\renames.jsonl`), `Batch.cs` (track picking, sidecar pairing), `Session*.cs` (the file
+  list, verdicts, Review, questions at save time, the batch save with up to two at once, reading), `Commands.cs`
+  (the JSON commands the window calls), `Py*.cs` (the Python string, sorting and path rules the answers were frozen
+  with: keep them).
+- `winui/SubScrub.Engine.Parity/`: the golden check. `winui/SubScrub.Engine.Tests/`: engine tests and `--qa-check`.
+- `installer/SubScrub-WinUI.iss`: the installer (per user; Start menu, desktop, Explorer menu, uninstaller).
+- `tests/golden/`: the retired Python engine's answers. `tests/fixtures/`: hand-written subtitle fixtures.
+  `tests/make_samples.py`: generated sample videos. `tools/extract-subs.ps1`: a PowerShell extractor.
 
 ## Rules the user decided (don't change without asking)
 
@@ -151,7 +129,7 @@ can't push tags, so don't try `git push` of a tag.)
 Mockup the user approved: https://claude.ai/artifact/67nXdn4nt8ehRWbJhs6Gbg (design canvas, both themes).
 
 - One accent, crimson `#C81E3A` (accent-2 `#9F1239`, light `#FDA4AF`). Neutrals carry a faint crimson tint (S4
-  tinted neutrals; the user chose this over the 2.7 pure greys). The formulas live in `theme.tokens()`. Dark mode is
+  tinted neutrals; the user chose this over the 2.7 pure greys). The colours live in `winui/SubScrub/Themes/Tokens.xaml`. Dark mode is
   a 165° gradient with two faint accent blooms; cards are glass with a hairline border and a lit top edge.
 - Crimson is used only for the primary button, switches, the selected tab, segment or track, and things that need
   checking. A file's state is a slim bar on its left edge plus one badge: ok green, warn amber, attention red.
@@ -159,39 +137,36 @@ Mockup the user approved: https://claude.ai/artifact/67nXdn4nt8ehRWbJhs6Gbg (des
   ("Which title is this?") in sentence case.
 - Layout: a top bar (logo, Files/Review tabs, tools state, theme, Settings, ⋯) and a footer bar (status, progress,
   the one primary button). Settings, About, the log and every question open inside the window over a blurred, dimmed
-  view (`GlassDialog`), never as a QMessageBox or a separate window.
-- Inter (bundled) with `ss01` and `cv09` app-wide. Tabular figures (`num_font()`) go on counts and timecodes only:
+  view (a glass dialog), never as a system message box or a separate window.
+- Inter (bundled, the open digits built in) app-wide. Tabular figures go on counts and timecodes only:
   Inter's `tnum` widens hyphens. Solar icons (linear, duotone for big ones).
 - 8–12px corners, hairline borders, soft shadows. The primary button glows only in dark mode. Focus rings show for
-  keyboard focus only (`KeyboardFocus`).
-- Painted widgets (segmented control, toggles, badges, track tiles, the preview rows) read `theme.CURRENT`. The style
-  sheet covers buttons, fields, menus and label roles (`objectName`, e.g. `Hint`, `CardTitle`).
-- Qt traps: a border-radius larger than half the widget's height is drawn square, so pills take their radius from
-  the real height at runtime; never hard-code pill radii. A dynamic property must not share a name with a Qt
-  property (`size`, `icon`): buttons use `btnsize` and `iconOnly`. QToolTip and native menus can't have round
-  corners: use `set_tip()` and `make_menu()`.
+  keyboard focus only.
+- Colours come only from `Tokens.xaml` through the theme resources; every control used has an S4 template in
+  `Themes/Controls.xaml`. Each Inter weight is its own font family, so set `FontFamily`, never `FontWeight`.
 - Badges hug their text. Cards fit their content. A hint that applies to every row is said once in the summary.
   When there's nothing left to do, hide the primary button instead of greying it out.
-- Speed (the user noticed lag in 2.7): no app-wide event filters; cache fonts, icons and row layouts; when one line
-  changes, update that row (`PreviewPanel.update_cue`) instead of rebuilding the list.
+- Speed (the user noticed lag in 2.7): the line list is virtualized; when one line changes, update that row
+  (`PreviewPanel.UpdateCue`) instead of rebuilding the list.
 
 ## Screenshots and the visual check (do this for any UI change)
 
-1. `python tools/ui_screenshots.py screenshots/ <video folder> dark` and again with `light`. It uses a throwaway
-   settings file, so the user's real settings and TMDB key are never touched. Use realistic content (real-looking
-   file names and numbers, and a few states: ready, needs attention, done), not an empty shell.
+1. Push and let the `winui` job run the scripted QA (`SubScrub.exe --shots`, both themes and 1000x680, on the
+   generated sample library with a throwaway settings file, so real settings and TMDB keys are never touched). The
+   images land on the `winui-screenshots` branch: fetch it and look at them. Make sure the screens show realistic
+   content and a few states (ready, needs attention, done).
 2. Open every image at full size and check for: clipped or overlapping text (including the last row of a list or
    the edge of a scroll area), odd spacing inside words or numbers, digits that don't look like Inter's (open 4, 6
    and 9, flat-top 3), badges stretched across a column, square corners on pills, repeated messages, cards
    stretched over empty space, greyed-out leftover buttons, labels that contradict the badge next to them,
    accent colour on things that don't need attention, inconsistent alignment or corner radii, low-contrast text in
    dark mode, wrong capitalisation (a sentence-case label or button, a Title Case message, a capital after a
-   comma), stray punctuation, missing icons. Also check a small window (`--size 1000x680`).
+   comma), stray punctuation, missing icons. Also check the small window.
 3. Fix what you find and capture again, at most two rounds. Send the user separate 1920×1080 images, one screen per
    file, named like `03-review-dark.png`. Never combine screens into one image or shrink a screen to fit more in.
    Show dialogs composited over the dimmed window.
-4. Say in a line or two what the check found and fixed. The native title bar, Mica and DPI scaling can't be seen
-   offscreen, so say so. Never claim a check you didn't do.
+4. Say in a line or two what the check found and fixed. The CI runner has no real Mica or DPI scaling, so say so.
+   Never claim a check you didn't do.
 
 Layout rules from the skill that apply here: one primary (accent-filled) button per area, hiding it when there's
 nothing to do; global top-bar actions stay in the same place on every screen (disable, don't remove); headings and
@@ -206,6 +181,7 @@ small hand-written fixtures in `tests/fixtures/` are committed.
 
 ## Things only a real Windows PC can confirm
 
-The title-bar colour (DWM), Mica, Recycle Bin moves, the Restart Manager "files in use" check, the font loading
-inside the PyInstaller exe, and real TMDB calls. The CI smoke test only proves the exe starts. When a change touches
+The title-bar colour (DWM), Mica, DPI scaling, Recycle Bin moves on the user's drives, the Restart Manager "files in
+use" check with a real torrent client, SSD detection, the Explorer right-click menu, and real TMDB calls. CI proves the
+app installs, starts, saves the sample library and hands paths over to an open window. When a change touches
 these, tell the user what to try and what they should see.

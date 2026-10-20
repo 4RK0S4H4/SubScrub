@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using SubScrub.Engine;
 
 // session <cases.json> <out.json>
-//   cases: {"files": {...}, "sessions": [{"name", "settings", "state", "script"}]} from tools/engine_parity.py
+//   cases: {"files": {...}, "sessions": [{"name", "settings", "state", "script"}]} from the retired tools/engine_parity.py, now in tests/golden/engine.json.br
 //   out:   {"files": {...}, "sessions": [[one result per action]]}, the shape the Python side writes
 internal static class SessionParity
 {

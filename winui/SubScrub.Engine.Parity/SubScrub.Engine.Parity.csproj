@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Runs the C# engine on the cases tools/cleaner_parity.py recorded from the Python engine and writes what it got,
-       for the script to compare. Not shipped. -->
+  <!-- Runs the C# engine on the cases frozen from the retired Python engine (tests/golden) and compares what it gets,
+       with the differences listed. Not shipped. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
