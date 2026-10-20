@@ -695,7 +695,7 @@ public sealed partial class Session
         var opts = new SaveOptions
         {
             Mode = mode, KeepOriginal = keep, MakeDefault = cfg.Default, TrackName = cfg.Name, Language = track.Language,
-            OverwriteSidecar = cfg.Overwrite, RecycleSourceSub = cfg.Recycle,
+            OverwriteSidecar = cfg.Overwrite, RecycleSourceSub = cfg.Recycle, TextUnchanged = n == 0 && track.External.Length == 0,
             RecyclePaths = cfg.Recycle && it.Kind == "video" ? Batch.RemovableSidecars(it, cfg.Keep, mode) : [],
         };
         if (tidy != null)

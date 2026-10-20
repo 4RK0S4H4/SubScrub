@@ -48,6 +48,13 @@ a time. Two saves never touch the same file or rename target at once, and the lo
 results read in list order as if the files had been saved one by one. Starting SubScrub again (or Explorer's
 right-click entry on several files) adds the files to the window already open instead of opening a second window.
 
+Decided 2026-10-20 (issue #49): when a save only changes an MKV's track flags and name (the cleaned text is the
+track's own, line for line: a regular track made the default and named "English"), SubScrub uses mkvpropedit instead
+of a full remux, but never on the original: it copies the video to `Name.subscrub-tmp.mkv`, edits the copy, checks it
+like any new file (tracks, fonts, chapters, lines) and swaps it in the usual way (the original to the Recycle Bin).
+If mkvpropedit is missing, fails or the check fails, it remuxes as before. Editing the original in place would be
+faster still, but a failure halfway (power cut, a crash) could leave the only copy damaged, so that isn't done.
+
 ## Install and update (built in batch 3, not yet released)
 
 - **Installer** `installer/SubScrub.iss` (Inno Setup, built in CI as `dist/SubScrub-Setup.exe` and attached to the

@@ -1190,4 +1190,51 @@ internal static class Tests
         }
         Check(ReadCache.Clear() > 0 && new DirectoryInfo(ReadCache.Folder).GetFiles().Length == 0, "Clear Cache empties it");
     }
+
+    // ================================================================ flags and names only: mkvpropedit on a copy (#49)
+
+    private static (List<string> Tracks, List<string> Lines, List<string> Log) FlagsOnlySave(string source, string name, Tools tools, bool unchanged)
+    {
+        var d = NewDir(name);
+        var mkv = Path.Combine(d, Path.GetFileName(source));
+        File.Copy(source, mkv);
+        Media.SendToTrash = ToBin;
+        var info = Media.Probe(tools, mkv);
+        var track = info.Subs.First(t => !t.Default && !t.SdhFlagged && Media.LangShort(t.Language) == "en");
+        var doc = SubFormats.Load(Media.ExtractSubs(tools, info, [track], Path.Combine(Tmp, name + "-x"))[track.Index], track.Fmt);
+        var text = doc.Render(doc.Cues.Select(c => (string?)c.Text).ToList());
+        var log = new List<string>();
+        var res = Media.Save(tools, info, track, text, track.Fmt,
+                             new SaveOptions { Mode = "replace", TrackName = "English", TextUnchanged = unchanged }, log: log.Add);
+        Check(res.Path == mkv && Leftovers(d).Count == 0 && Directory.GetFiles(d).Length == 1, "one file, no leftovers");
+        var after = Media.Probe(ToolsFound, mkv);
+        var lines = new List<string>();
+        foreach (var (idx, path) in Media.ExtractSubs(ToolsFound, after, after.Subs, Path.Combine(Tmp, name + "-y")).OrderBy(kv => kv.Key))
+            lines.AddRange(SubFormats.Load(path).Cues.Select(c => $"{idx} {c.Start} {c.End} {c.Text}"));
+        var tracks = after.Streams.Select(x => $"{x["codec_type"]} {x["codec_name"]}")
+            .Concat(after.Subs.Select(t => $"{t.Language} {t.Title} default={t.Default} forced={t.Forced} hi={t.HearingImpaired} cleaned={t.Cleaned}"))
+            .Append($"chapters={after.Chapters} attachments={after.Count("attachment")}").ToList();
+        return (tracks, lines, log);
+    }
+
+    public static void TestFlagsOnlySaveMatchesARemux()
+    {
+        NeedTools();
+        var lib = Path.Combine(Root, "samples", "library");
+        if (string.IsNullOrEmpty(ToolsFound.Mkvpropedit) || !Directory.Exists(lib))
+            throw new Skip("needs MKVToolNix and the sample library");
+        var source = Directory.EnumerateFiles(lib, "Severance*.mkv").First();
+        var (t1, l1, log1) = FlagsOnlySave(source, "props-edit", ToolsFound, true);
+        Check(log1.Any(l => l.Contains("to change its track flags")) && !log1.Any(l => l.Contains("rewriting the file instead")), "mkvpropedit was used");
+        var (t2, l2, log2) = FlagsOnlySave(source, "props-remux", ToolsFound, false);
+        Check(!log2.Any(l => l.Contains("to change its track flags")), "the comparison is a remux");
+        Check(t1.SequenceEqual(t2), "the same tracks and flags:\n" + string.Join("\n", t1) + "\n--\n" + string.Join("\n", t2));
+        Check(l1.SequenceEqual(l2) && l1.Count > 100, "the same lines and times");
+        // mkvpropedit failing falls back to the remux
+        var broken = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe, Mkvmerge = ToolsFound.Mkvmerge,
+                                 Mkvextract = ToolsFound.Mkvextract, Mkvpropedit = Path.Combine(Tmp, "no-such-mkvpropedit") };
+        var (t3, l3, log3) = FlagsOnlySave(source, "props-broken", broken, true);
+        Check(log3.Any(l => l.Contains("rewriting the file instead")), "fell back to a remux");
+        Check(t3.SequenceEqual(t2) && l3.SequenceEqual(l2), "and saved the same file");
+    }
 }

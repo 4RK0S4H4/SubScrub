@@ -86,6 +86,8 @@ public sealed class SaveOptions
     public string KeepLanguage { get; set; } = "eng";
     public string RenameTo { get; set; } = "";
     public List<string> RenameSidecars { get; set; } = [];
+    /// <summary>The cleaned text is the track's own, line for line: only its flags and name change (mkvpropedit).</summary>
+    public bool TextUnchanged { get; set; }
 
     /// <summary>dataclasses.replace(opts): the lists are shared, as in Python.</summary>
     public SaveOptions Copy() => (SaveOptions)MemberwiseClone();
