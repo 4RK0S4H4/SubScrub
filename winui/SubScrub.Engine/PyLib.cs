@@ -152,8 +152,24 @@ public static class PyPath
     /// <summary>os.path.normcase</summary>
     public static string NormCase(string p) => IsWin ? p.Replace('/', '\\').ToLowerInvariant() : p;
 
-    /// <summary>os.path.abspath</summary>
-    public static string Abs(string p) => Path.GetFullPath(p);
+    /// <summary>os.path.abspath. On Windows that is GetFullPathNameW, which (unlike .NET's GetFullPath) leaves short
+    /// "RUNNER~1" names as they are.</summary>
+    public static string Abs(string p)
+    {
+        if (!IsWin)
+            return Path.GetFullPath(p);
+        var buf = new char[Math.Max(260, p.Length + 260)];
+        var n = GetFullPathNameW(p, buf.Length, buf, IntPtr.Zero);
+        if (n > buf.Length)
+        {
+            buf = new char[n];
+            n = GetFullPathNameW(p, buf.Length, buf, IntPtr.Zero);
+        }
+        return n == 0 ? Path.GetFullPath(p) : new string(buf, 0, (int)n);
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern uint GetFullPathNameW(string path, int size, [System.Runtime.InteropServices.Out] char[] buffer, IntPtr filePart);
 
     public static string Key(string p) => NormCase(Abs(p));
 

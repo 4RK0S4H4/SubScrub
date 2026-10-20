@@ -501,6 +501,7 @@ def diff(a, b, path="") -> list[str]:
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     argv = sys.argv[1:]
     if "--library" not in argv:
         print(__doc__)
