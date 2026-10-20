@@ -774,9 +774,15 @@ public sealed partial class Session
         else
         {
             prog(-1, "Opening");
-            it.Info = Media.Probe(Tools, it.Path, Log);
+            var reader = ReadCache.Reader(Tools);
+            var cached = ReadCache.Get(it.Path, reader);
+            var probe = cached?.Probe ?? Media.ProbeText(Tools, it.Path, Log);
+            it.Info = Media.ParseProbe(it.Path, probe);
             tmpdir = Directory.CreateTempSubdirectory("subscrub_").FullName;
-            var paths = Media.ExtractSubs(Tools, it.Info, it.Info.Subs, tmpdir, (f, _) => prog(f, "Reading subtitles"), cancel, Log);
+            var paths = cached != null ? Restore(cached, it.Info, tmpdir)
+                : Media.ExtractSubs(Tools, it.Info, it.Info.Subs, tmpdir, (f, _) => prog(f, "Reading subtitles"), cancel, Log);
+            if (cached == null)
+                ReadCache.Put(it.Path, reader, probe, paths);
             (it.Docs, errors) = LoadDocs(it.Info, paths);
             Batch.AttachSidecars(it, Log);
         }

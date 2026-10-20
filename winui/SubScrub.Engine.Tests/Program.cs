@@ -1130,4 +1130,64 @@ internal static class Tests
         for (var i = 0; i < one.Count; i++)
             Check(one[i] == two[i], $"view {i} differs");
     }
+
+    // ================================================================ the read cache (#48)
+
+    private static (List<string> Views, List<string> Log) ReadOnce(string dir, string name)
+    {
+        var s = new Session(new FileStore(Path.Combine(Tmp, name + ".json")));
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var views = new List<string> { s.FilesView().ToJsonString() };
+        foreach (var it in s.Items.ToList())
+            foreach (var show in new[] { "check", "changes", "all" })
+                views.Add(s.Review(it.Uid, show).ToJsonString());
+        List<string> log;
+        lock (s.LogLines)
+            log = [.. s.LogLines];
+        s.Close();
+        return (views.Select(v => NoUids(JsonNode.Parse(v))!.ToJsonString()).ToList(), log);
+    }
+
+    public static void TestReadCacheGivesTheSameVerdictsAndReview()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run python -m tests.make_samples --library first");
+        var dir = NewDir("cache");
+        CopyDir(lib, dir);
+        ReadCache.Clear();
+        var (fresh, log1) = ReadOnce(dir, "cache-1");
+        Check(!log1.Any(l => l.Contains("read from the cache")), "the first read is fresh");
+        var (again, log2) = ReadOnce(dir, "cache-2");
+        var videos = Directory.EnumerateFiles(dir, "*.mkv").Count();
+        Check(log2.Count(l => l.Contains("read from the cache")) == videos, "every video came from the cache");
+        Check(!log2.Any(l => l.Contains("$ ") && (l.Contains("ffprobe") || l.Contains("mkvextract") || l.Contains("ffmpeg"))),
+              "no tool ran the second time");
+        Check(fresh.Count == again.Count, "same number of views");
+        for (var i = 0; i < fresh.Count; i++)
+            Check(fresh[i] == again[i], $"view {i} differs");
+        // a changed file is read again
+        var one = Directory.EnumerateFiles(dir, "*.mkv").First();
+        File.SetLastWriteTimeUtc(one, DateTime.UtcNow.AddMinutes(1));
+        var (_, log3) = ReadOnce(dir, "cache-3");
+        Check(log3.Count(l => l.Contains("read from the cache")) == videos - 1, "the changed file was read fresh");
+        // the cap: least recently used first
+        var before = ReadCache.Cap;
+        try
+        {
+            var sizes = new DirectoryInfo(ReadCache.Folder).GetFiles("*.bin").Sum(f => f.Length);
+            ReadCache.Cap = sizes / 2;
+            File.SetLastWriteTimeUtc(one, DateTime.UtcNow.AddMinutes(2));
+            ReadOnce(dir, "cache-4");
+            Check(new DirectoryInfo(ReadCache.Folder).GetFiles("*.bin").Sum(f => f.Length) <= ReadCache.Cap, "trimmed to the cap");
+        }
+        finally
+        {
+            ReadCache.Cap = before;
+        }
+        Check(ReadCache.Clear() > 0 && new DirectoryInfo(ReadCache.Folder).GetFiles().Length == 0, "Clear Cache empties it");
+    }
 }

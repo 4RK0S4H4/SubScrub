@@ -364,12 +364,19 @@ public static partial class Media
         return null;
     }
 
-    public static MediaInfo Probe(Tools tools, string path, Action<string>? log = null)
+    public static MediaInfo Probe(Tools tools, string path, Action<string>? log = null) => ParseProbe(path, ProbeText(tools, path, log));
+
+    /// <summary>What ffprobe says about a file, as its JSON (kept as it is by the read cache).</summary>
+    public static string ProbeText(Tools tools, string path, Action<string>? log = null)
     {
         if (string.IsNullOrEmpty(tools.Ffprobe))
             throw new ToolError("FFprobe was not found. Install FFmpeg first.");
-        var outText = RunCapture([tools.Ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
-                                  "-show_chapters", path], log, 120);
+        return RunCapture([tools.Ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
+                           "-show_chapters", path], log, 120);
+    }
+
+    public static MediaInfo ParseProbe(string path, string outText)
+    {
         var data = JsonNode.Parse(outText.Length > 0 ? outText : "{}")?.AsObject() ?? [];
         var streams = (data["streams"] as JsonArray ?? []).Select(s => s!.DeepClone().AsObject()).ToList();
         var fmt = data["format"] as JsonObject ?? [];

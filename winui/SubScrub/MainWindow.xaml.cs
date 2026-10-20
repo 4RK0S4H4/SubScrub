@@ -1218,6 +1218,7 @@ public sealed partial class MainWindow : Window
                 buttons.Add(new() { Key = "ffmpeg", Label = "Install FFmpeg" });
             if (t.Mkvmerge.Length == 0)
                 buttons.Add(new() { Key = "mkvmerge", Label = "Install MKVToolNix" });
+            buttons.Add(new() { Key = "cache", Label = "Clear Cache" });
             buttons.Add(new() { Key = "again", Label = "Scan Again" });
             buttons.Add(new() { Key = "ok", Label = "Done", Kind = "primary" });
             var (choice, _) = await AskAsync(new Question
@@ -1230,8 +1231,9 @@ public sealed partial class MainWindow : Window
                 Rows = [["FFmpeg", Row(t.Ffmpeg, "ffmpeg", false)], ["FFprobe", Row(t.Ffprobe, "ffprobe", false)],
                         ["MKVToolNix", Row(t.Mkvmerge, "mkvmerge", true)], ["mkvextract", Row(t.Mkvextract, "mkvextract", true)],
                         ["mkvpropedit", Row(t.Mkvpropedit, "mkvpropedit", true)]],
-                Detail = t.Ready && t.Mkvmerge.Length > 0 ? ""
-                    : "The install buttons run Windows' package manager (winget) in its own window; SubScrub looks again when it finishes.",
+                Detail = (t.Ready && t.Mkvmerge.Length > 0 ? ""
+                    : "The install buttons run Windows' package manager (winget) in its own window; SubScrub looks again when it finishes. ")
+                    + "SubScrub remembers files it has read, so adding them again is instant; Clear Cache forgets them.",
                 Buttons = buttons,
             });
             try
@@ -1254,6 +1256,17 @@ public sealed partial class MainWindow : Window
                     var tools = await Core.Call<ToolsView>("tools_rescan");
                     Files.Tools = tools;
                     ApplyTools(tools);
+                    continue;
+                }
+                if (choice == "cache")
+                {
+                    var r = await Core.CallRaw("cache_clear") as System.Text.Json.Nodes.JsonObject;
+                    var mb = (r?["freed"]?.GetValue<long>() ?? 0) / 1048576.0;
+                    await TellAsync(new Message
+                    {
+                        Title = "Cache cleared",
+                        Text = $"SubScrub will read every file fresh next time ({mb.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} MB freed).",
+                    });
                     continue;
                 }
                 if (choice != "again")

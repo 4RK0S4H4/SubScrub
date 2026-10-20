@@ -355,7 +355,10 @@ public sealed partial class Session
         string? tmp = null;
         try
         {
-            var info = Media.Probe(tools, path, Log);
+            var reader = ReadCache.Reader(tools);
+            var cached = ReadCache.Get(path, reader);
+            var probe = cached?.Probe ?? Media.ProbeText(tools, path, Log);
+            var info = Media.ParseProbe(path, probe);
             var paths = new Dictionary<int, string>();
             var docs = new Dictionary<int, SubtitleDoc>();
             var errors = new Dictionary<int, string>();
@@ -379,9 +382,13 @@ public sealed partial class Session
                         Changed(false);
                     }
                 }, 0.15);
-                paths = Media.ExtractSubs(tools, info, info.Subs, tmp, prog, cancel, Log);
+                paths = cached != null ? Restore(cached, info, tmp) : Media.ExtractSubs(tools, info, info.Subs, tmp, prog, cancel, Log);
                 (docs, errors) = LoadDocs(info, paths);
             }
+            if (cached == null)
+                ReadCache.Put(path, reader, probe, paths);
+            else
+                Log($"{it.Name}: read from the cache");
             lock (Lock)
             {
                 if (Item(uid) == null || cancel.IsCancellationRequested)
@@ -428,6 +435,18 @@ public sealed partial class Session
                     CheckLocksAsync();
             }
         }
+    }
+
+    /// <summary>A cached file's tracks, written back as extraction would have left them.</summary>
+    private static Dictionary<int, string> Restore(ReadCache.Entry cached, MediaInfo info, string tmp)
+    {
+        var paths = new Dictionary<int, string>();
+        foreach (var t in info.Subs.Where(t => t.TextBased && cached.Tracks.ContainsKey(t.Index)))
+        {
+            paths[t.Index] = PyPath.Join(tmp, $"track{t.Index}.{t.Fmt}");
+            File.WriteAllBytes(paths[t.Index], cached.Tracks[t.Index]);
+        }
+        return paths;
     }
 
     private void FinishLoad(Item it)
