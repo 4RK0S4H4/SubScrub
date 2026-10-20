@@ -4,6 +4,9 @@ namespace SubScrub.Engine;
 
 public sealed partial class Session
 {
+    private Thread? _saver;
+    private CancellationTokenSource _saveCancel = new();
+
     private static JsonObject Button(string key, string label, string kind = "") =>
         new() { ["key"] = key, ["label"] = label, ["kind"] = kind };
 

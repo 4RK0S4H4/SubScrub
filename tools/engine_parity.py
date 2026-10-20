@@ -1,5 +1,6 @@
 """Check that the C# engine (winui/SubScrub.Engine) gives exactly what the Python one gives, beyond the cleaner:
-the file list's logic (subscrub/batch.py) and the views of subscrub/core.py (stage 2 of the port).
+the file list's logic (subscrub/batch.py), the views of subscrub/core.py (stage 2 of the port) and reading files:
+finding the tools, ffprobe, extracting the tracks, subtitle files on their own, unfinished copies (stage 3).
 
     python tools/engine_parity.py --library samples/library [--keep <folder>]
 
@@ -473,6 +474,102 @@ def build_sessions(library: Path, tmp: Path) -> tuple[list, list]:
     return cases, expected
 
 
+# ============================================================================ reading files (stage 3)
+
+def doc_view(d) -> dict:
+    return {"fmt": d.fmt, "cues": [[c.start, c.end, c.text] for c in d.cues], "render": d.render([c.text for c in d.cues])}
+
+
+def loaded_view(s: core.Session, added: list) -> dict:
+    """What reading left behind, with file numbers replaced by their place in the list."""
+    pos = {it.uid: k for k, it in enumerate(s.items)}
+    items = []
+    for it in s.items:
+        items.append({"path": it.path, "kind": it.kind, "state": it.state, "info": info_json(it.info),
+                      "docs": {str(k): doc_view(d) for k, d in it.docs.items()},
+                      "doc_errors": {str(k): (v if v == "Couldn't read this track." else "error")
+                                     for k, v in it.doc_errors.items()},
+                      "sdh_counts": {str(k): v for k, v in it.sdh_counts.items()}, "sel": it.sel,
+                      "sidecars": [track_json(t) for t in it.sidecars], "dropped": sorted(it.dropped),
+                      "message": it.message if not it.message.startswith("couldn't read it (") else "couldn't read it",
+                      "progress": it.progress, "has_result": it.result is not None,
+                      "tmpdir": it.tmpdir is not None})
+    fv = s.files_view()
+    for r in fv["rows"]:
+        r["uid"] = pos[r["uid"]]
+        if r["detail"].startswith("Couldn't read it ("):
+            r["detail"] = "Couldn't read it"
+    fv["review_uid"] = None
+    return {"added": added, "items": items, "files": fv}
+
+
+def reading_cases(tmp: Path) -> tuple[dict, dict]:
+    """Fresh sessions on both sides add the same files and folders (no title lookups); what they read must match.
+    Also ffprobe and the extracted tracks of every video, subtitle files on their own, and unfinished copies."""
+    lib, edge, subs = tmp / "library", tmp / "edge", tmp / "subs"
+    vids = sorted(str(p) for r in (lib, edge) for p in r.rglob("*") if p.suffix.lower() in media.VIDEO_EXTS)
+    lone = sorted(str(p) for p in subs.iterdir())
+    adds = [
+        {"name": "library", "adds": [[str(lib)]]},
+        {"name": "edge cases", "adds": [[str(edge)]]},
+        {"name": "files, then the folder", "adds": [vids[:2], [str(lib)]]},
+        {"name": "subtitle files", "adds": [lone, lone[:1]]},
+        {"name": "a video with its .srt", "adds": [[str(p) for p in sorted(lib.glob("Slow.Horses*"))]]},
+        {"name": "nothing there", "adds": [[str(tmp / "nothing")], [str(tmp / "edge" / "picture subtitles only")]]},
+        {"name": "sidecars, subtitle mode New File", "settings": {"sub_mode": "new"},
+         "adds": [[str(p) for p in sorted(lib.glob("Slow.Horses*.srt"))]]},
+    ]
+    (tmp / "nothing").mkdir(exist_ok=True)
+    # unfinished copies: with and without their original
+    lo = tmp / "leftovers"
+    lo.mkdir()
+    (lo / "Movie.mkv").write_bytes(b"x")
+    (lo / "Movie.subscrub-tmp.mkv").write_bytes(b"xyz")
+    (lo / "Gone.subscrub-tmp.mp4").write_bytes(b"ab")
+    (lo / "Notes.subscrub-tmp.txt").write_bytes(b"a")
+    (lo / "sub").mkdir()
+    (lo / "sub" / "Deep.subscrub-tmp.mkv").write_bytes(b"abcd")
+    cases = {"adds": adds, "probe": vids, "lone": lone, "tmp": str(tmp / "extract"),
+             "leftovers": [[str(lo)], [str(lo / "Movie.mkv")], [str(lo / "Gone.subscrub-tmp.mp4")], [str(lo / "sub")]],
+             "restore": str(lo / "Gone.subscrub-tmp.mp4")}
+    exp = {"adds": [], "probe": [], "lone": [], "leftovers": [], "tools": None, "restore": None}
+    tools = media.find_tools()
+    exp["tools"] = {"ffmpeg": tools.ffmpeg, "ffprobe": tools.ffprobe, "mkvmerge": tools.mkvmerge}
+    for case in adds:
+        settings = tmp / f"read-{len(exp['adds'])}.json"
+        st = core.Store(str(settings))
+        st.set("rename_on", "false")
+        for k, v in (case.get("settings") or {}).items():
+            st.set(k, v)
+        case["settings_file"] = str(tmp / f"read-{len(exp['adds'])}-cs.json")
+        shutil.copy(settings, case["settings_file"])
+        sess = core.Session(core.Store(str(settings)))
+        added = []
+        for paths in case["adds"]:
+            r = sess.add(paths)
+            if not sess.wait_idle(600):
+                raise SystemExit("the Python session didn't finish reading")
+            added.append(r)
+        exp["adds"].append(loaded_view(sess, added))
+        sess.close()
+    for k, v in enumerate(vids):
+        info = media.probe(tools, v)
+        out = tmp / "extract" / f"py{k}"
+        got = media.extract_subs(tools, info, info.subs, str(out))
+        files = {}
+        for idx, path in got.items():
+            files[str(idx)] = Path(path).read_bytes().decode("utf-8", "replace")
+        exp["probe"].append({"info": info_json(info), "extracted": files})
+    for f in lone:
+        info, doc = media.probe_subtitle_file(f)
+        exp["lone"].append({"info": info_json(info), "doc": doc_view(doc)})
+    for paths in cases["leftovers"]:
+        exp["leftovers"].append([[x.path, x.original, x.size, x.name] for x in media.find_leftovers(paths)])
+    exp["restore"] = media.restore_leftover(media.find_leftovers([cases["restore"]])[0])
+    os.rename(exp["restore"], cases["restore"])            # back, for the C# side
+    return cases, exp
+
+
 # ============================================================================ comparing
 
 def norm(x):
@@ -513,8 +610,9 @@ def main() -> int:
     try:
         sessions, expected_sessions = build_sessions(library, tmp)
         fcases, fexpected = file_cases([tmp / "library", tmp / "edge", tmp / "subs"])
-        cases = {"files": fcases, "sessions": sessions}
-        expected = norm({"files": fexpected, "sessions": expected_sessions})
+        rcases, rexpected = reading_cases(tmp)
+        cases = {"files": fcases, "sessions": sessions, "reading": rcases}
+        expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected})
         (tmp / "cases.json").write_text(json.dumps(cases, ensure_ascii=False, default=str), encoding="utf-8")
         run = subprocess.run(["dotnet", "run", "--project", str(PARITY), "-c", "Release", "--", "session",
                               str(tmp / "cases.json"), str(tmp / "csharp.json")], capture_output=True, text=True)
@@ -532,13 +630,14 @@ def main() -> int:
         n_ops = sum(len(s) for s in expected_sessions)
         n_items = sum(len(c["state"]["items"]) for c in sessions)
         print(f"{len(sessions)} sessions ({n_items} files), {n_ops:,} views and actions, "
-              f"{len(fcases['pair']) + len(fcases['subs']) + len(fcases['videos']) + len(fcases['names'])} file cases")
+              f"{len(fcases['pair']) + len(fcases['subs']) + len(fcases['videos']) + len(fcases['names'])} file cases, "
+              f"{len(rcases['adds'])} fresh reads, {len(rcases['probe'])} videos probed and extracted")
         if problems:
             for p in problems[:40]:
                 print("  DIFF", p)
             print(f"{len(problems)} differences between the Python and the C# engine")
             return 1
-        print("The C# engine's file list, Review and save questions match the Python ones exactly.")
+        print("The C# engine reads files and gives the same file list, Review and save questions as the Python one.")
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

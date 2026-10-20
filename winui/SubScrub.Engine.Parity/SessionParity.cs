@@ -23,6 +23,8 @@ internal static class SessionParity
             sessions.Add(results);
         }
         output["sessions"] = sessions;
+        if (cases["reading"] is JsonObject reading)
+            output["reading"] = Reading(reading);
         File.WriteAllText(outPath, output.ToJsonString(Session.JsonOut));
     }
 
@@ -289,6 +291,105 @@ internal static class SessionParity
             }
             outp["output_path"] = paths;
         }
+        return outp;
+    }
+
+    // ================================================================ reading files
+
+    private static JsonObject TrackJson(SubTrack t) => new()
+    {
+        ["index"] = t.Index, ["sub_pos"] = t.SubPos, ["codec"] = t.Codec, ["language"] = t.Language, ["title"] = t.Title,
+        ["default"] = t.Default, ["forced"] = t.Forced, ["hearing_impaired"] = t.HearingImpaired,
+        ["disposition"] = new JsonObject(t.Disposition.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+        ["external"] = t.External, ["cleaned"] = t.Cleaned,
+    };
+
+    private static JsonObject? InfoJson(MediaInfo? i) => i == null ? null : new JsonObject
+    {
+        ["path"] = i.Path, ["kind"] = i.Kind, ["format_name"] = i.FormatName, ["duration"] = i.Duration, ["size"] = i.Size,
+        ["streams"] = new JsonArray(i.Streams.Select(x => (JsonNode)x.DeepClone()).ToArray()),
+        ["subs"] = new JsonArray(i.Subs.Select(t => (JsonNode)TrackJson(t)).ToArray()), ["companion"] = i.Companion,
+        ["chapters"] = i.Chapters,
+    };
+
+    private static JsonObject DocView(SubtitleDoc d) => new()
+    {
+        ["fmt"] = d.Fmt,
+        ["cues"] = new JsonArray(d.Cues.Select(c => (JsonNode)new JsonArray(c.Start, c.End, c.Text)).ToArray()),
+        ["render"] = d.Render(d.Cues.Select(c => (string?)c.Text).ToList()),
+    };
+
+    private static JsonObject LoadedView(Session s, JsonArray added)
+    {
+        var pos = s.Items.Select((it, k) => (it.Uid, k)).ToDictionary(x => x.Uid, x => x.k);
+        var items = new JsonArray();
+        foreach (var it in s.Items)
+        {
+            items.Add(new JsonObject
+            {
+                ["path"] = it.Path, ["kind"] = it.Kind, ["state"] = it.State, ["info"] = InfoJson(it.Info),
+                ["docs"] = new JsonObject(it.Docs.Select(kv => KeyValuePair.Create(kv.Key.ToString(), (JsonNode?)DocView(kv.Value)))),
+                ["doc_errors"] = new JsonObject(it.DocErrors.Select(kv => KeyValuePair.Create(kv.Key.ToString(),
+                    (JsonNode?)(kv.Value == "Couldn't read this track." ? kv.Value : "error")))),
+                ["sdh_counts"] = new JsonObject(it.SdhCounts.Select(kv => KeyValuePair.Create(kv.Key.ToString(), (JsonNode?)kv.Value))),
+                ["sel"] = it.Sel, ["sidecars"] = new JsonArray(it.Sidecars.Select(t => (JsonNode)TrackJson(t)).ToArray()),
+                ["dropped"] = Arr(it.Dropped.Order(PyFmt.Order)),
+                ["message"] = it.Message.StartsWith("couldn't read it (", StringComparison.Ordinal) ? "couldn't read it" : it.Message,
+                ["progress"] = it.Progress, ["has_result"] = it.Result != null, ["tmpdir"] = it.Tmpdir != null,
+            });
+        }
+        var fv = s.FilesView();
+        foreach (var r in fv["rows"]!.AsArray())
+        {
+            r!["uid"] = pos[r["uid"]!.GetValue<int>()];
+            if (Str(r["detail"])!.StartsWith("Couldn't read it (", StringComparison.Ordinal))
+                r["detail"] = "Couldn't read it";
+        }
+        fv["review_uid"] = null;
+        return new JsonObject { ["added"] = added, ["items"] = items, ["files"] = fv };
+    }
+
+    private static JsonObject Reading(JsonObject c)
+    {
+        var outp = new JsonObject();
+        var tools = Media.FindTools();
+        outp["tools"] = new JsonObject { ["ffmpeg"] = tools.Ffmpeg, ["ffprobe"] = tools.Ffprobe, ["mkvmerge"] = tools.Mkvmerge };
+        var adds = new JsonArray();
+        foreach (var a in c["adds"]!.AsArray())
+        {
+            var s = new Session(new FileStore(Str(a!["settings_file"])!));
+            s.Start("parity");
+            var added = new JsonArray();
+            foreach (var paths in a["adds"]!.AsArray())
+            {
+                added.Add(s.Add(paths!.AsArray().Select(x => Str(x)!).ToList()));
+                if (!s.WaitIdle(600))
+                    throw new TimeoutException("the C# session didn't finish reading");
+            }
+            adds.Add(LoadedView(s, added));
+            s.Close();
+        }
+        outp["adds"] = adds;
+        var probe = new JsonArray();
+        var k = 0;
+        foreach (var v in c["probe"]!.AsArray())
+        {
+            var info = Media.Probe(tools, Str(v)!);
+            var got = Media.ExtractSubs(tools, info, info.Subs, Path.Combine(Str(c["tmp"])!, $"cs{k++}"));
+            var files = new JsonObject();
+            foreach (var (idx, path) in got)
+                files[idx.ToString()] = new System.Text.UTF8Encoding(false).GetString(File.ReadAllBytes(path));
+            probe.Add(new JsonObject { ["info"] = InfoJson(info), ["extracted"] = files });
+        }
+        outp["probe"] = probe;
+        outp["lone"] = new JsonArray(c["lone"]!.AsArray().Select(f =>
+        {
+            var (info, doc) = Media.ProbeSubtitleFile(Str(f)!);
+            return (JsonNode)new JsonObject { ["info"] = InfoJson(info), ["doc"] = DocView(doc) };
+        }).ToArray());
+        outp["leftovers"] = new JsonArray(c["leftovers"]!.AsArray().Select(p => (JsonNode)new JsonArray(
+            Media.FindLeftovers(p!.AsArray().Select(x => Str(x)!)).Select(x => (JsonNode)new JsonArray(x.Path, x.Original, x.Size, x.Name)).ToArray())).ToArray());
+        outp["restore"] = Media.RestoreLeftover(Media.FindLeftovers([Str(c["restore"])!])[0]);
         return outp;
     }
 
