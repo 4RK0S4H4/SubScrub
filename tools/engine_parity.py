@@ -20,6 +20,7 @@ find_sidecars, guess_language, clean_subtitle_name and the save's output_path.
 from __future__ import annotations
 
 import copy
+import re
 import json
 import os
 import shutil
@@ -794,6 +795,79 @@ def naming_cases(tmp: Path) -> tuple[dict, dict]:
     return cases, exp
 
 
+# ============================================================================ the commands, end to end (stage 6)
+
+COMMAND_SCRIPT = [
+    ["hello", {}], ["add", {"paths": ["<lib>"]}], ["wait_idle", {}], ["files", {}],
+    ["review_all", {}], ["leftovers", {"paths": ["<lib>"]}], ["undo_renames_question", {}],
+    ["save_walk", {"answers": {"decision": "guess", "names": "keep", "rewrite": "go", "lone": "go", "overwrite": "yes",
+                               "locks": "skip"}}],
+    ["wait_idle", {}], ["files", {}], ["undo_renames_question", {}], ["undo_renames", {}], ["files", {}],
+    ["settings_set", {"values": {"video_mode": "new"}}], ["clear", {}], ["files", {}],
+]
+
+
+def commands_case(library: Path, tmp: Path) -> tuple[dict, list]:
+    """The helper's commands on one copy of the library (Python) and the C# engine's on another."""
+    from subscrub import helper
+    a, b = tmp / "cmd-py", tmp / "cmd-cs"
+    for d in (a, b):
+        shutil.copytree(library, d / "lib", ignore=shutil.ignore_patterns("_tmp"))
+    os.environ["LOCALAPPDATA"] = str(a / "appdata")
+    srv = helper.Server(open(os.devnull, "w", encoding="utf-8"), settings=str(a / "settings.json"), demo_tmdb=True)
+    srv.session._check_locks_async = lambda: None
+    got = []
+    for cmd, args in COMMAND_SCRIPT:
+        args = json.loads(json.dumps(args).replace("<lib>", json.dumps(str(a / "lib"))[1:-1]))
+        try:
+            if cmd == "review_all":
+                got.append([srv.session.review(r["uid"], None, True) for r in srv.session.files_view()["rows"]])
+            elif cmd == "save_walk":
+                ans, out = {}, []
+                for _ in range(10):
+                    q = helper.COMMANDS["save"](srv, answers=dict(ans))
+                    out.append(q)
+                    if "ask" not in q:
+                        break
+                    ans[q["ask"]["key"]] = args["answers"][q["ask"]["key"]]
+                got.append(out)
+            else:
+                got.append(helper.COMMANDS[cmd](srv, **args))
+        except Exception as e:  # noqa: BLE001
+            got.append({"error": str(e)})
+    srv.session.close()
+    os.environ["LOCALAPPDATA"] = str(tmp / "appdata")
+    return {"dir": str(b), "script": COMMAND_SCRIPT}, normalize_commands(got, a)
+
+
+def normalize_commands(got, folder: Path):
+    """Same shape on both sides: file numbers by their place, the folder as <dir>, times masked, no tool paths."""
+    text = json.dumps(got, ensure_ascii=False)
+    text = text.replace(json.dumps(str(folder))[1:-1], "<dir>")
+    text = re.sub(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", "<time>", text)
+    data = json.loads(text)
+    uids: dict = {}
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in list(x.items()):
+                if k in ("uid", "review_uid") and isinstance(v, int):
+                    x[k] = uids.setdefault(v, len(uids))
+                elif k == "uids" and isinstance(v, list):
+                    x[k] = [uids.setdefault(u, len(uids)) for u in v]
+                elif k == "tools" and isinstance(v, dict) and "ffmpeg" in v:
+                    x[k] = {"ready": v.get("ready")}
+                elif k == "version":
+                    x[k] = "<version>"
+                else:
+                    walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(data)
+    return data
+
+
 # ============================================================================ comparing
 
 def norm(x):
@@ -838,17 +912,22 @@ def main() -> int:
         rcases, rexpected = reading_cases(tmp)
         scases, sexpected = saving_cases(library, tmp)
         ncases, nexpected = naming_cases(tmp)
-        cases = {"files": fcases, "sessions": sessions, "reading": rcases, "saving": scases, "naming": ncases}
+        ccase, cexpected = commands_case(library, tmp)
+        cases = {"files": fcases, "sessions": sessions, "reading": rcases, "saving": scases, "naming": ncases,
+                 "commands": ccase}
         expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected, "saving": sexpected,
-                         "naming": nexpected})
+                         "naming": nexpected, "commands": cexpected})
         (tmp / "cases.json").write_text(json.dumps(cases, ensure_ascii=False, default=str), encoding="utf-8")
+        env = dict(os.environ, LOCALAPPDATA=str(tmp / "cmd-cs" / "appdata"))
         run = subprocess.run(["dotnet", "run", "--project", str(PARITY), "-c", "Release", "--", "session",
-                              str(tmp / "cases.json"), str(tmp / "csharp.json")], capture_output=True, text=True)
+                              str(tmp / "cases.json"), str(tmp / "csharp.json")], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", env=env)
         if run.returncode != 0:
             print(run.stdout[-6000:], run.stderr[-6000:])
             print("the C# side failed to run")
             return 1
         got = json.loads((tmp / "csharp.json").read_text(encoding="utf-8"))
+        got["commands"] = normalize_commands(got["commands"], tmp / "cmd-cs")
         if keep:
             keep.mkdir(parents=True, exist_ok=True)
             shutil.copy(tmp / "cases.json", keep / "cases.json")

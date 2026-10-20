@@ -4,14 +4,13 @@ A native rewrite of SubScrub's window in WinUI 3 (C#, .NET 8, Windows App SDK 1.
 Python/Qt app in `subscrub/` is still the one that ships; this folder grows alongside it until it matches. It ships as
 SubScrub 4.0 once it does (until then the csproj says `4.0.0-dev.N`; the Qt app stays on 3.x).
 
-**Stage 2 (now): the real engine.** The window is C#; the cleaning, muxing, TMDB lookups, safe swap and the "files in
-use" check are the Python engine, bundled with PyInstaller as `core\subscrub-core.exe` next to `SubScrub.exe`. The
-window starts it and talks to it with one JSON object per line over stdin/stdout (`subscrub/helper.py` describes the
-protocol; `subscrub/core.py` is the Qt window's logic without Qt). Working: Add Files, Add Folder, drag and drop,
-reading with real states and badges, `.srt` sidecars, the files-in-use warning, every question at save time
-(lines it isn't sure about, unsure titles, rewriting in place, overwriting), the TMDB title picker, saving with
-progress, Stop, Review (tracks, edits per file, the caption screen, timeline and before/after list with one-row
-updates) and Settings saved to disk.
+**All C# now (stage 6).** The window and the engine are both C#: the engine is `SubScrub.Engine`, a port of the
+Python engine that gives identical results (see below), run inside the app (`Services/Core.cs` answers the same
+commands with the same JSON that `subscrub/helper.py` speaks, so the window's view objects didn't change). No Python
+and no `core` folder ship with it. Working: Add Files, Add Folder, drag and drop, reading with real states and badges,
+`.srt` sidecars, the files-in-use warning, every question at save time (lines it isn't sure about, unsure titles,
+rewriting in place, overwriting), the TMDB title picker, saving with progress, Stop, Review (tracks, edits per file,
+the caption screen, timeline and before/after list with one-row updates), Undo Renames and Settings.
 
 Settings live where the Qt app keeps them (`HKEY_CURRENT_USER\Software\SubScrub\SubScrub`), so both apps share one set
 of settings and one TMDB key.
@@ -24,8 +23,7 @@ rules, risk, reasons, notes, counts or the saved file. `python tools/engine_pari
 does the same for the rest of the engine: real Python sessions read the sample library, the edge cases, subtitle files
 on their own and a library after a real save, then a script of actions (every view, track changes, kept lines,
 per-file edits, settings, every save question with several sets of answers and programs holding files open) runs on
-both engines from the same state. CI runs both checks on Linux (`screenshots` job) and on Windows (`winui` job). The
-window keeps using the Python helper for anything not ported yet.
+both engines from the same state. CI runs both checks on Linux (`screenshots` job) and on Windows (`winui` job).
 
 - Stage 1 (done): the cleaner (`Cleaner.cs`) and the subtitle formats (`SubFormats.cs`), with `Py.cs` for the
   few Python string rules the results depend on. Change `subscrub/cleaner.py` first, then the port, then run the check.
@@ -48,20 +46,18 @@ window keeps using the Python helper for anything not ported yet.
   session's title lookups (`SessionNames.cs`), plus the settings in the Qt app's registry key with QSettings'
   escaping (`RegistryStore`). The parity check compares every call `tests/test_naming.py` makes, a corpus of release
   names and 938 title matches against both stand-ins.
-- Next: the switch to the C# engine. When that is done, the `core` folder goes.
+- Stage 6 (done): the app runs the C# engine in-process (`SubScrub.Engine/Commands.cs`, `Services/Core.cs`); the
+  PyInstaller helper is gone from the WinUI build. The Python helper and its tests stay, since the Qt app still ships
+  on them.
 
 ## Build (Windows)
 
     dotnet publish winui/SubScrub/SubScrub.csproj -c Release -r win-x64 -p:Platform=x64 -o winui-out
-    python -m PyInstaller --noconfirm --onedir --console --name subscrub-core --distpath helper-dist ^
-        --exclude-module PySide6 --exclude-module tkinter --hidden-import send2trash run_core.py
-    xcopy /e /i helper-dist\subscrub-core winui-out\core
     winui-out\SubScrub.exe
 
 Unpackaged and self-contained: the output folder runs as it is. FFmpeg and MKVToolNix are found the same way as the
-Qt app finds them. Without `core\subscrub-core.exe`, a build run from a source checkout starts `python -m
-subscrub.helper` in the repository instead (or `SUBSCRUB_CORE`, a full command line). CI (`winui` job in
-`.github/workflows/build.yml`) builds both on every push and attaches the folder as `SubScrub-WinUI`.
+Qt app finds them. CI (`winui` job in `.github/workflows/build.yml`) builds it on every push and attaches the folder
+as `SubScrub-WinUI`.
 
 ## Scripted QA and screenshots
 

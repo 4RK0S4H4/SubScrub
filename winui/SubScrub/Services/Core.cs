@@ -1,17 +1,15 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Dispatching;
+using SubScrub.Engine;
 using SubScrub.Models;
 
 namespace SubScrub.Services;
 
-/// <summary>The engine: subscrub-core.exe (the Python cleaner, muxing, TMDB and safe swap, built with PyInstaller
-/// and shipped in the "core" folder next to SubScrub.exe), driven with one JSON object per line over stdin/stdout.
-/// See subscrub/helper.py for the protocol. Replies come back as tasks; events ("files", "review_changed",
-/// "save_done") are raised on the UI thread.</summary>
+/// <summary>The engine: the C# port of SubScrub's Python engine (winui/SubScrub.Engine), run in-process. Commands
+/// and replies are the JSON of subscrub/helper.py's protocol (see SubScrub.Engine.Commands), so the window's view
+/// objects are the same as when the engine was a separate process. Replies come back as tasks; events ("files",
+/// "review_changed", "save_done") are raised on the UI thread.</summary>
 public sealed class Core : IDisposable
 {
     public static readonly JsonSerializerOptions Json = new()
@@ -21,106 +19,91 @@ public sealed class Core : IDisposable
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
     };
 
-    private readonly Process _process;
     private readonly DispatcherQueue _ui;
-    private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonNode?>> _pending = new();
-    private readonly SemaphoreSlim _write = new(1, 1);
-    private readonly StringBuilder _stderr = new();
-    private int _nextId;
+    private Commands? _engine;
+    // commands run one at a time, in order, as the helper ran them; the slow ones (network, Windows) run beside them
+    private readonly SemaphoreSlim _order = new(1, 1);
 
     public event Action<FilesView>? Files;
     public event Action<int>? ReviewChanged;
     public event Action<SaveDone>? SaveDone;
+#pragma warning disable CS0067 // kept for the window: an in-process engine doesn't stop on its own
     public event Action<string>? Died;
+#pragma warning restore CS0067
 
     public Hello? Ready { get; private set; }
-    private readonly TaskCompletionSource<Hello> _ready = new();
+    private readonly TaskCompletionSource<Hello> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<Hello> WhenReady => _ready.Task;
 
-    private Core(Process process, DispatcherQueue ui)
-    {
-        _process = process;
-        _ui = ui;
-    }
+    private Core(DispatcherQueue ui) => _ui = ui;
 
-    /// <summary>Starts the engine. Looks for core\subscrub-core.exe next to the app; from a source checkout it
-    /// runs "python -m subscrub.helper" in the repository instead (or SUBSCRUB_CORE, a full command line).</summary>
+    /// <summary>Starts the engine. Arguments as the helper took them: --settings &lt;file.json&gt; (instead of the
+    /// registry), --demo-tmdb (the stand-in for TMDB), --log &lt;file&gt;.</summary>
     public static Core Start(DispatcherQueue ui, IEnumerable<string> extraArgs)
     {
-        var (file, args, dir) = Locate();
-        var info = new ProcessStartInfo(file)
+        var args = extraArgs.ToList();
+        string? Opt(string name)
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = new UTF8Encoding(false),
-            StandardErrorEncoding = new UTF8Encoding(false),
-            WorkingDirectory = dir,
-        };
-        foreach (var a in args.Concat(extraArgs))
-            info.ArgumentList.Add(a);
-        info.Environment["PYTHONIOENCODING"] = "utf-8";
-        info.Environment["PYTHONUTF8"] = "1";
-        var process = Process.Start(info) ?? throw new InvalidOperationException("The SubScrub engine didn't start.");
-        // the engine stops with the app, even if the app is killed
-        Job.Attach(process);
-        var core = new Core(process, ui);
-        process.StandardInput.AutoFlush = false;
-        _ = Task.Run(core.ReadLoop);
-        _ = Task.Run(core.ReadErrors);
+            var i = args.IndexOf(name);
+            return i >= 0 && i + 1 < args.Count ? args[i + 1] : null;
+        }
+        var core = new Core(ui);
+        var version = typeof(Core).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
+        version = version.Split('+')[0];
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                core._engine = new Commands(version, Opt("--settings"), args.Contains("--demo-tmdb"), Opt("--log"), core.Dispatch);
+                var hello = core._engine.Hello().Deserialize<Hello>(Json)!;
+                core.Ready = hello;
+                core._ready.TrySetResult(hello);
+            }
+            catch (Exception e)
+            {
+                Log.Write($"engine: {e}");
+                core._ready.TrySetException(new CoreException(e.Message));
+            }
+        });
         return core;
     }
 
-    public static string Where() => Locate().File;
-
-    private static (string File, string[] Args, string Dir) Locate()
-    {
-        var env = Environment.GetEnvironmentVariable("SUBSCRUB_CORE");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            var parts = env.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            return (parts[0], parts.Skip(1).ToArray(), AppContext.BaseDirectory);
-        }
-        var exe = Path.Combine(AppContext.BaseDirectory, "core", "subscrub-core.exe");
-        if (File.Exists(exe))
-            return (exe, Array.Empty<string>(), Path.GetDirectoryName(exe)!);
-        // a source checkout: walk up to the folder that has subscrub/helper.py
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
-        {
-            if (File.Exists(Path.Combine(d.FullName, "subscrub", "helper.py")))
-                return ("python", new[] { "-m", "subscrub.helper" }, d.FullName);
-        }
-        return (exe, Array.Empty<string>(), AppContext.BaseDirectory);
-    }
+    /// <summary>Where the engine runs (for the About screen and the log).</summary>
+    public static string Where() => "built in (C#)";
 
     // ================================================================ requests
 
     public async Task<JsonNode?> CallRaw(string cmd, object? args = null)
     {
-        var id = Interlocked.Increment(ref _nextId);
-        var tcs = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = tcs;
-        var line = JsonSerializer.Serialize(new { id, cmd, args = args ?? new { } }, Json);
-        await _write.WaitAsync();
+        await WhenReady;
+        var engine = _engine ?? throw new CoreException("The SubScrub engine isn't running. Restart SubScrub.");
+        var json = args is JsonObject jo ? (JsonObject)jo.DeepClone()
+            : JsonSerializer.SerializeToNode(args ?? new { }, Json) as JsonObject ?? [];
+        var slow = Commands.Async.Contains(cmd);
+        if (!slow)
+            await _order.WaitAsync();
         try
         {
-            if (_process.HasExited)
-                throw new CoreException("The SubScrub engine stopped. Restart SubScrub.");
-            await _process.StandardInput.WriteLineAsync(line);
-            await _process.StandardInput.FlushAsync();
-        }
-        catch (Exception e) when (e is IOException or ObjectDisposedException)
-        {
-            _pending.TryRemove(id, out _);
-            throw new CoreException("The SubScrub engine stopped. Restart SubScrub.");
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    return engine.Run(cmd, json)?.DeepClone();
+                }
+                catch (Exception e)
+                {
+                    engine.Session.Log($"{cmd} failed: {e}");
+                    throw new CoreException(e.Message.Length > 0 ? e.Message : e.GetType().Name);
+                }
+            });
         }
         finally
         {
-            _write.Release();
+            if (!slow)
+                _order.Release();
         }
-        return await tcs.Task;
     }
 
     public async Task<T> Call<T>(string cmd, object? args = null)
@@ -131,76 +114,7 @@ public sealed class Core : IDisposable
 
     public Task Do(string cmd, object? args = null) => CallRaw(cmd, args);
 
-    // ================================================================ reading
-
-    private async Task ReadLoop()
-    {
-        var reader = _process.StandardOutput;
-        try
-        {
-            while (await reader.ReadLineAsync() is { } line)
-            {
-                if (line.Length == 0)
-                    continue;
-                JsonNode? msg;
-                try
-                {
-                    msg = JsonNode.Parse(line);
-                }
-                catch (JsonException)
-                {
-                    continue;
-                }
-                if (msg is not JsonObject obj)
-                    continue;
-                if (obj.TryGetPropertyValue("event", out var ev))
-                {
-                    Dispatch(ev!.GetValue<string>(), obj["data"]);
-                    continue;
-                }
-                var id = obj["id"]?.GetValue<int>() ?? 0;
-                if (!_pending.TryRemove(id, out var tcs))
-                    continue;
-                if (obj["ok"]?.GetValue<bool>() == true)
-                    tcs.TrySetResult(obj["result"]?.DeepClone());
-                else
-                    tcs.TrySetException(new CoreException(obj["error"]?.GetValue<string>() ?? "Something went wrong."));
-            }
-        }
-        catch (Exception)
-        {
-            // the pipe broke: handled below
-        }
-        var why = "The SubScrub engine stopped." + (_stderr.Length > 0 ? "\n\n" + Tail(_stderr.ToString()) : "");
-        foreach (var (_, tcs) in _pending)
-            tcs.TrySetException(new CoreException(why));
-        _pending.Clear();
-        _ready.TrySetException(new CoreException(why));
-        if (!_disposed)
-            _ui.TryEnqueue(() => Died?.Invoke(why));
-    }
-
-    private async Task ReadErrors()
-    {
-        try
-        {
-            while (await _process.StandardError.ReadLineAsync() is { } line)
-            {
-                lock (_stderr)
-                {
-                    _stderr.AppendLine(line);
-                    if (_stderr.Length > 20000)
-                        _stderr.Remove(0, _stderr.Length - 20000);
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // nothing more to read
-        }
-    }
-
-    private static string Tail(string text) => text.Length > 1500 ? "…" + text[^1500..] : text;
+    // ================================================================ events
 
     private void Dispatch(string name, JsonNode? data)
     {
@@ -208,11 +122,6 @@ public sealed class Core : IDisposable
         {
             switch (name)
             {
-                case "ready":
-                    var hello = data.Deserialize<Hello>(Json)!;
-                    Ready = hello;
-                    _ready.TrySetResult(hello);
-                    break;
                 case "files":
                     var files = data.Deserialize<FilesView>(Json)!;
                     _ui.TryEnqueue(() => Files?.Invoke(files));
@@ -242,15 +151,11 @@ public sealed class Core : IDisposable
         _disposed = true;
         try
         {
-            _process.StandardInput.WriteLine("{\"id\":0,\"cmd\":\"shutdown\",\"args\":{}}");
-            _process.StandardInput.Flush();
-            _process.StandardInput.Close();
-            if (!_process.WaitForExit(8000))
-                _process.Kill(true);
+            _engine?.Close();
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            // already gone
+            Log.Write($"engine close: {e.Message}");
         }
     }
 }
