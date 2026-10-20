@@ -344,6 +344,57 @@ jobs:
           if (Test-Path "$dir\screen-capture-errors.txt") { Get-Content "$dir\screen-capture-errors.txt" }
           if ($fail.Count -gt 0) { throw ($fail -join "; ") }
 
+      # the installer for the WinUI app; it installs over SubScrub 3.x (same AppId, folder and Start-menu name)
+      - name: Build the WinUI installer (SubScrub-Setup.exe)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          [xml]$proj = Get-Content winui\SubScrub\SubScrub.csproj
+          $v = ($proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1).Split('-')[0]
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" "/DSourceDir=..\winui-out" installer\SubScrub-WinUI.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path dist-winui\SubScrub-Setup.exe)) { throw "dist-winui\SubScrub-Setup.exe was not made" }
+          Get-Item dist-winui\SubScrub-Setup.exe | Format-Table Name, Length
+
+      # quietly, as the in-app updater does: install, check it starts, install over the top, uninstall
+      - name: Smoke-test the WinUI installer
+        shell: pwsh
+        run: |
+          function Run-Quietly($file, $argList) {
+            $p = Start-Process $file -ArgumentList $argList -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "$file did not finish within 5 minutes" }
+            return $p.ExitCode
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "SubScrubWinUI"
+          $setupArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir", "/LOG=$env:RUNNER_TEMP\setup-winui.log")
+          $code = Run-Quietly dist-winui\SubScrub-Setup.exe $setupArgs
+          if ($code -ne 0) { Get-Content "$env:RUNNER_TEMP\setup-winui.log" -Tail 40; throw "installer exit code $code" }
+          foreach ($f in 'SubScrub.exe', 'unins000.exe', 'SubScrub.pri') { if (-not (Test-Path "$dir\$f")) { throw "$f was not installed" } }
+          $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\SubScrub.lnk"
+          if (-not (Test-Path $lnk)) { throw "no Start-menu shortcut" }
+          Start-Sleep -Seconds 10                   # a quiet install starts the app by itself
+          $run = @(Get-Process SubScrub -ErrorAction SilentlyContinue)
+          if ($run.Count -eq 0) { throw "the installed SubScrub did not start" }
+          $run | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $code = Run-Quietly dist-winui\SubScrub-Setup.exe $setupArgs                        # an upgrade over the top
+          if ($code -ne 0) { throw "second install exit code $code" }
+          Start-Sleep -Seconds 6
+          Get-Process SubScrub -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $null = Run-Quietly "$dir\unins000.exe" @('/VERYSILENT', '/SUPPRESSMSGBOXES')
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\SubScrub.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\SubScrub.exe") { throw "the uninstaller left SubScrub.exe behind" }
+          if (Test-Path $lnk) { throw "the uninstaller left the Start-menu shortcut" }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SubScrub-WinUI-Setup
+          path: dist-winui/SubScrub-Setup.exe
+          if-no-files-found: warn
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

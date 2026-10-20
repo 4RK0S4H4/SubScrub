@@ -46,6 +46,9 @@ public sealed partial class MainWindow : Window
     private string _show = "changes";
     private bool _dialogOpen;
     private bool _closing;
+
+    /// <summary>When the window first drew (for the QA run's timings).</summary>
+    public DateTime? FirstFrame { get; private set; }
     private DispatcherQueueTimerWrapper? _ruleTimer;
     private TaskCompletionSource<SaveDone>? _saveWait;
 
@@ -75,6 +78,7 @@ public sealed partial class MainWindow : Window
         TopBar.SizeChanged += (_, _) => UpdateTitleBarRegions();
         Root.Loaded += (_, _) =>
         {
+            FirstFrame ??= DateTime.Now;
             OnThemeChanged();
             UpdateTitleBarRegions();
             WelcomeScreen.PlayDemo();
@@ -83,7 +87,11 @@ public sealed partial class MainWindow : Window
 
         BuildReview();
         WireInput();
-        SizeWindow(Shots.Size ?? (1340, 900));
+        if (!RestorePlacement())
+            SizeWindow(Shots.Size ?? (1340, 900));
+        else
+            SizeWindow((0, 0), minimumOnly: true);
+        TrackPlacement();
         ShowPage("welcome");
         StartCore();
 
@@ -141,6 +149,7 @@ public sealed partial class MainWindow : Window
                 _ = RefreshReviewAsync(keep: true);
         };
         Core.SaveDone += OnSaveDone;
+        Core.UpdateProgress += OnUpdateProgress;
         Core.Died += why =>
         {
             if (_closing)
@@ -161,6 +170,7 @@ public sealed partial class MainWindow : Window
                 Settings.Theme = t;
             ApplyTheme();
             ApplyTools(hello.Tools);
+            StartUpdateCheck();
             var paths = Environment.GetCommandLineArgs().Skip(1).Where(a => File.Exists(a) || Directory.Exists(a)).ToList();
             if (paths.Count > 0 && Shots.Dir == null)
                 await AddPathsAsync(paths);
@@ -260,9 +270,18 @@ public sealed partial class MainWindow : Window
 
     // ================================================================ window and title bar
 
-    private void SizeWindow((int W, int H) size)
+    private void SizeWindow((int W, int H) size, bool minimumOnly = false)
     {
         var scale = Shots.Dir != null ? 1.0 : Dpi.Scale(this);
+        if (minimumOnly)
+        {
+            if (AppWindow.Presenter is OverlappedPresenter mp)
+            {
+                mp.PreferredMinimumWidth = (int)(1000 * scale);
+                mp.PreferredMinimumHeight = (int)(680 * scale);
+            }
+            return;
+        }
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         var w = (int)(size.W * scale);
         var h = (int)(size.H * scale);
@@ -309,6 +328,7 @@ public sealed partial class MainWindow : Window
     {
         if (_closing)
             return;
+        SavePlacement();
         if (Files.Busy && Core != null)
         {
             e.Cancel = true;
@@ -1177,26 +1197,66 @@ public sealed partial class MainWindow : Window
         while (true)
         {
             var t = Files.Tools.Ffmpeg.Length > 0 || Core.Ready == null ? Files.Tools : Core.Ready.Tools;
-            var (choice, _) = await AskAsync(new Question
-            {
-                Key = "tools", Title = "Tools and Paths",
-                Text = "SubScrub reads and writes videos with FFmpeg and MKVToolNix. Nothing is re-encoded.",
-                Rows = [["FFmpeg", t.Ffmpeg.Length > 0 ? t.Ffmpeg : "Not found"],
-                        ["FFprobe", t.Ffprobe.Length > 0 ? t.Ffprobe : "Not found"],
-                        ["MKVToolNix", t.Mkvmerge.Length > 0 ? t.Mkvmerge : "Not found"]],
-                Detail = t.Ready ? "" : "Install FFmpeg and MKVToolNix (winget: Gyan.FFmpeg and MoritzBunkus.MKVToolNix), then click Check Again.",
-                Buttons = [new() { Key = "again", Label = "Check Again" }, new() { Key = "ok", Label = "Close", Kind = "primary" }],
-            });
-            if (choice != "again")
-                return;
+            Dictionary<string, string> versions = [];
             try
             {
-                var tools = await Core.Call<ToolsView>("tools_rescan");
-                Files.Tools = tools;
-                ApplyTools(tools);
+                versions = await Core.Call<Dictionary<string, string>>("tools_versions") ?? [];
             }
             catch (CoreException)
             {
+            }
+            string Row(string path, string key, bool optional) =>
+                path.Length > 0 ? $"✓  {(versions.GetValueOrDefault(key) is { Length: > 0 } v ? v : "Found")}   {path}"
+                    : optional ? "Not Found (Optional)" : "Not Found";
+            var buttons = new List<ButtonDef>();
+            if (t.Ffmpeg.Length == 0 || t.Ffprobe.Length == 0)
+                buttons.Add(new() { Key = "ffmpeg", Label = "Install FFmpeg" });
+            if (t.Mkvmerge.Length == 0)
+                buttons.Add(new() { Key = "mkvmerge", Label = "Install MKVToolNix" });
+            buttons.Add(new() { Key = "again", Label = "Scan Again" });
+            buttons.Add(new() { Key = "ok", Label = "Done", Kind = "primary" });
+            var (choice, _) = await AskAsync(new Question
+            {
+                Key = "tools", Title = "Tools",
+                Text = "FFmpeg is required. MKVToolNix is optional but recommended: it's the most faithful way to rewrite MKV "
+                       + "files (it keeps every tag, chapter and attachment exactly as they were). Nothing is re-encoded.",
+                Rows = [["FFmpeg", Row(t.Ffmpeg, "ffmpeg", false)], ["FFprobe", Row(t.Ffprobe, "ffprobe", false)],
+                        ["MKVToolNix", Row(t.Mkvmerge, "mkvmerge", true)]],
+                Detail = t.Ready && t.Mkvmerge.Length > 0 ? ""
+                    : "The install buttons run Windows' package manager (winget) in its own window; SubScrub looks again when it finishes.",
+                Buttons = buttons,
+            });
+            try
+            {
+                if (choice is "ffmpeg" or "mkvmerge")
+                {
+                    var id = choice == "ffmpeg" ? "Gyan.FFmpeg" : "MoritzBunkus.MKVToolNix";
+                    StatusText.Text = $"Installing {(choice == "ffmpeg" ? "FFmpeg" : "MKVToolNix")} with winget…";
+                    var r = await Core.CallRaw("winget_install", new { id }) as System.Text.Json.Nodes.JsonObject;
+                    StatusText.Text = "";
+                    if (r?["missing"] is not null)
+                    {
+                        await TellAsync(new Message
+                        {
+                            Title = "winget isn't available", Text = "Windows Package Manager (winget) isn't available on this PC.",
+                            Detail = "Download FFmpeg from https://www.gyan.dev/ffmpeg/builds/ or MKVToolNix from "
+                                     + "https://mkvtoolnix.download/, install it, then click Scan Again.",
+                        });
+                    }
+                    var tools = await Core.Call<ToolsView>("tools_rescan");
+                    Files.Tools = tools;
+                    ApplyTools(tools);
+                    continue;
+                }
+                if (choice != "again")
+                    return;
+                var found = await Core.Call<ToolsView>("tools_rescan");
+                Files.Tools = found;
+                ApplyTools(found);
+            }
+            catch (CoreException ex)
+            {
+                await TellAsync(new Message { Title = "Something went wrong", Text = ex.Message });
                 return;
             }
         }
