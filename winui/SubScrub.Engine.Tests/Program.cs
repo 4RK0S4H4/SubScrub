@@ -1078,4 +1078,56 @@ internal static class Tests
         }
         Check(tracks >= 15, $"{tracks} tracks compared");
     }
+
+    // ================================================================ reading two files at once (#47)
+
+    private static List<string> ReadAndLook(string lib, string name, bool ssd, out int mostAtOnce)
+    {
+        var dir = NewDir(name);
+        CopyDir(lib, dir);
+        CopyDir(Path.Combine(Root, "samples", "edge"), Path.Combine(dir, "edge"));
+        Media.DriveOf = _ => ("disk", ssd);
+        var s = new Session(new FileStore(Path.Combine(Tmp, name + ".json")));
+        s.Start("tests");
+        var most = 0;
+        var watch = new Thread(() =>
+        {
+            while (true)
+            {
+                int n;
+                lock (s.Lock)
+                    n = s.Items.Count(i => i.State is "probing" or "reading");
+                most = Math.Max(most, n);
+                if (s.Items.Count > 0 && !s.Items.Any(i => i.State is "queued" or "probing" or "reading"))
+                    return;
+                Thread.Sleep(2);
+            }
+        }) { IsBackground = true };
+        s.Add([dir]);
+        watch.Start();
+        Check(s.WaitIdle(300));
+        watch.Join(TimeSpan.FromSeconds(10));
+        mostAtOnce = most;
+        var views = new List<string> { s.FilesView().ToJsonString() };
+        foreach (var it in s.Items.ToList())
+            foreach (var show in new[] { "check", "changes", "all" })
+                views.Add(s.Review(it.Uid, show).ToJsonString());
+        s.Close();
+        return views.Select(v => NoUids(JsonNode.Parse(v.Replace(dir.Replace("\\", "\\\\"), "<dir>")))!.ToJsonString()).ToList();
+    }
+
+    public static void TestTwoReadsAtOnceGiveTheSameViews()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib) || !Directory.Exists(Path.Combine(Root, "samples", "edge")))
+            throw new Skip("run python -m tests.make_samples --library and --edge first");
+        var one = ReadAndLook(lib, "read-one", false, out var mostOne);
+        var two = ReadAndLook(lib, "read-two", true, out var mostTwo);
+        Check(mostOne == 1, $"a hard drive reads one file at a time ({mostOne})");
+        Check(mostTwo == 2, $"an SSD reads two at a time ({mostTwo})");
+        Check(one.Count == two.Count && one.Count > 20, "same number of views");
+        for (var i = 0; i < one.Count; i++)
+            Check(one[i] == two[i], $"view {i} differs");
+    }
 }

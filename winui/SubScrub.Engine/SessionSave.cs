@@ -309,7 +309,7 @@ public sealed partial class Session
         var q = SaveQuestion(only, a);
         if (q["go"] is not JsonObject go)
             return q;
-        Thread? loader;
+        List<Thread> loaders;
         lock (Lock)
         {
             if (Busy())
@@ -321,9 +321,10 @@ public sealed partial class Session
             }
             _saving = true;                         // from here on nothing else starts reading files
             _loadCancel.Cancel();
-            loader = _loader;
+            loaders = _loads.Values.Select(l => l.Thread).ToList();
         }
-        loader?.Join(TimeSpan.FromSeconds(10));
+        foreach (var loader in loaders)
+            loader.Join(TimeSpan.FromSeconds(10));
         try
         {
             return StartBatch(go);
@@ -373,8 +374,7 @@ public sealed partial class Session
     {
         lock (Lock)
         {
-            _loader = null;
-            _loadingUid = null;
+            _loads.Clear();
             var single = Config.Truthy(go["single"]);
             var policy = go["policy"]!.GetValue<string>();
             var items = go["uids"]!.AsArray().Select(u => Item(u!.GetValue<int>())).Where(i => i != null).Select(i => i!).ToList();
