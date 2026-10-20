@@ -241,10 +241,43 @@ public static class PyPath
         paths.OrderBy(p => IsWin ? p.ToLowerInvariant() : p, PyFmt.Order).ToList();
 }
 
-/// <summary>difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes() on code points.</summary>
+/// <summary>difflib.SequenceMatcher(None, a, b) on code points: ratio() and (autojunk off) get_opcodes().</summary>
 public static class SequenceMatcher
 {
+    /// <summary>ratio() of difflib.SequenceMatcher(None, a, b) (autojunk on, as by default).</summary>
+    public static double Ratio(int[] a, int[] b)
+    {
+        var matches = MatchingBlocks(a, b, true).Sum(x => x.K);
+        var length = a.Length + b.Length;
+        return length > 0 ? 2.0 * matches / length : 1.0;
+    }
+
     public static List<(string Tag, int I1, int I2, int J1, int J2)> Opcodes(int[] a, int[] b)
+    {
+        var nonAdjacent = MatchingBlocks(a, b, false);
+        var ops = new List<(string, int, int, int, int)>();
+        int ai = 0, bj = 0;
+        foreach (var (ai2, bj2, size) in nonAdjacent)
+        {
+            var tag = "";
+            if (ai < ai2 && bj < bj2)
+                tag = "replace";
+            else if (ai < ai2)
+                tag = "delete";
+            else if (bj < bj2)
+                tag = "insert";
+            if (tag.Length > 0)
+                ops.Add((tag, ai, ai2, bj, bj2));
+            ai = ai2 + size;
+            bj = bj2 + size;
+            if (size > 0)
+                ops.Add(("equal", ai2, ai, bj2, bj));
+        }
+        return ops;
+    }
+
+    /// <summary>get_matching_blocks(), ending with the (len(a), len(b), 0) sentinel.</summary>
+    public static List<(int I, int J, int K)> MatchingBlocks(int[] a, int[] b, bool autojunk)
     {
         var b2j = new Dictionary<int, List<int>>();
         for (var j = 0; j < b.Length; j++)
@@ -252,6 +285,12 @@ public static class SequenceMatcher
             if (!b2j.TryGetValue(b[j], out var list))
                 b2j[b[j]] = list = [];
             list.Add(j);
+        }
+        if (autojunk && b.Length >= 200)
+        {
+            var ntest = b.Length / 100 + 1;
+            foreach (var elt in b2j.Where(kv => kv.Value.Count > ntest).Select(kv => kv.Key).ToList())
+                b2j.Remove(elt);
         }
 
         (int, int, int) Longest(int alo, int ahi, int blo, int bhi)
@@ -324,25 +363,6 @@ public static class SequenceMatcher
         if (k1 > 0)
             nonAdjacent.Add((i1, j1, k1));
         nonAdjacent.Add((a.Length, b.Length, 0));
-
-        var ops = new List<(string, int, int, int, int)>();
-        int ai = 0, bj = 0;
-        foreach (var (ai2, bj2, size) in nonAdjacent)
-        {
-            var tag = "";
-            if (ai < ai2 && bj < bj2)
-                tag = "replace";
-            else if (ai < ai2)
-                tag = "delete";
-            else if (bj < bj2)
-                tag = "insert";
-            if (tag.Length > 0)
-                ops.Add((tag, ai, ai2, bj, bj2));
-            ai = ai2 + size;
-            bj = bj2 + size;
-            if (size > 0)
-                ops.Add(("equal", ai2, ai, bj2, bj));
-        }
-        return ops;
+        return nonAdjacent;
     }
 }

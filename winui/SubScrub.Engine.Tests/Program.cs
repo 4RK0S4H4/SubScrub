@@ -637,4 +637,84 @@ internal static class Tests
         Check(File.Exists(a) && File.Exists(Path.Combine(d, "Old Name.eng.srt")) && !File.Exists(b));
         Check(s.UndoRenamesQuestion() == null, "the batch is marked undone");
     }
+
+    // ================================================================ TMDB and settings (tests/test_naming.py)
+
+    public static void TestApiKeyAndErrors()
+    {
+        string? url = null, auth = null;
+        var t = new Tmdb("0123456789abcdef0123456789abcdef") { Opener = (u, a) => { (url, auth) = (u, a); return (200, "{\"results\": []}"); } };
+        t.SearchMovie("x");
+        Check(url!.Contains("api_key=0123") && auth == null, url);
+        t = new Tmdb("eyJ" + new string('a', 100)) { Opener = (u, a) => { (url, auth) = (u, a); return (200, "{\"results\": []}"); } };
+        t.SearchMovie("y y");
+        Check(!url!.Contains("api_key") && auth!.StartsWith("Bearer ", StringComparison.Ordinal) && url.Contains("query=y+y"), url);
+        var e = Throws<TmdbError>(() => new Tmdb("bad") { Opener = (_, _) => (401, "") }.SearchMovie("x"));
+        Check(e.Message.Contains("key"), e.Message);
+        var calls = 0;
+        e = Throws<TmdbError>(() => new Tmdb("k") { Opener = (_, _) => { calls++; return (429, ""); }, Sleep = _ => { } }.SearchMovie("x"));
+        Check(calls == 3 && e.Message.StartsWith("Couldn't reach TMDB", StringComparison.Ordinal), e.Message);
+        Check(new Tmdb("k") { Opener = (_, _) => (404, "") }.Movie(1).Count == 0, "404 is no result");
+        calls = 0;
+        var cached = new Tmdb("k") { Opener = (_, _) => { calls++; return (200, "{\"results\": [{\"id\": 1}]}"); } };
+        cached.SearchMovie("Dune");
+        cached.SearchMovie("Dune");
+        Check(calls == 1, "answers are cached");
+    }
+
+    public static void TestDemoStandInFindsTheLibrary()
+    {
+        var m = Naming.MatchTitle(FakeTmdb.Demo(), "Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv");
+        Check(m.Confident && Naming.Render(m.Best!, ".mkv") == "Severance S2 E4.mkv", m.Best?.Label() ?? "none");
+        m = Naming.MatchTitle(FakeTmdb.Demo(), "Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv", 167 * 60);
+        Check(m.Confident && Naming.Render(m.Best!, ".mkv") == "Dune - Part Two.mkv");
+    }
+
+    public static void TestSettingsInTheRegistry()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new Skip("Windows only");
+        var root = @"Software\SubScrub\EngineTests-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var store = new RegistryStore(root);
+            store.Set("theme", "dark");
+            store.Set("track_name", "@home");
+            store.Set("tools/ffmpeg", @"C:\ffmpeg\bin\ffmpeg.exe");
+            Check(store.Get("theme") == "dark" && store.Get("track_name") == "@home" && store.Get("missing", "x") == "x");
+            Check(store.Get("tools/ffmpeg") == @"C:\ffmpeg\bin\ffmpeg.exe");
+            using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(root)!)
+                Check((string)k.GetValue("track_name")! == "@@home", "QSettings' escaping of a leading @");
+            var cfg = new Config(store) { TmdbKey = "abc", KeepSdh = true };
+            cfg.Save();
+            var again = new Config(new RegistryStore(root));
+            Check(again.TmdbKey == "abc" && again.KeepSdh && again.Theme == "dark");
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(root, false);
+        }
+    }
+
+    public static void TestTitleLookupsInTheSession()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run \"python -m tests.make_samples --library\" first");
+        var dir = NewDir("names");
+        foreach (var f in Directory.EnumerateFiles(lib, "Severance*"))
+            File.Copy(f, Path.Combine(dir, Path.GetFileName(f)));
+        var settings = Path.Combine(Tmp, "names.json");
+        new FileStore(settings).Set("tmdb_key", "stand-in");
+        var s = new Session(new FileStore(settings)) { TmdbFactory = _ => FakeTmdb.Demo() };
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var row = s.FilesView()["rows"]![0]!;
+        Check(row["rename"]!.GetValue<string>() == "Severance S2 E4.mkv", row.ToJsonString());
+        var found = s.NameSearch(s.Items[0].Uid, "Slow Horses");
+        Check(found["choices"]!.AsArray().Count == 2, found.ToJsonString());
+        s.Close();
+    }
 }

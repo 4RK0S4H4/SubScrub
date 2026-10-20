@@ -23,6 +23,7 @@ public sealed partial class Session
             _dirty.Set();
         };
         PumpLoader = PumpLoaderNow;
+        StartNames();
         _notifier = new Thread(NotifyLoop) { IsBackground = true, Name = "notify" };
         _notifier.Start();
         Log($"SubScrub {version} (engine). FFmpeg: {Tools.Ffmpeg ?? "not found"}; MKVToolNix: {Tools.Mkvmerge ?? "not found"}");

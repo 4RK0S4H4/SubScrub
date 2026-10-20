@@ -27,6 +27,8 @@ internal static class SessionParity
             output["reading"] = Reading(reading);
         if (cases["saving"] is JsonArray saving)
             output["saving"] = Saving(saving);
+        if (cases["naming"] is JsonObject naming)
+            output["naming"] = NamingCases(naming);
         File.WriteAllText(outPath, output.ToJsonString(Session.JsonOut));
     }
 
@@ -474,6 +476,80 @@ internal static class SessionParity
             }
             outp.Add(SavedView(full, dir, res, err));
         }
+        return outp;
+    }
+
+    // ================================================================ names
+
+    private static JsonObject ChoiceJson(Choice c) => new()
+    {
+        ["kind"] = c.Kind, ["tmdb_id"] = c.TmdbId, ["title"] = c.Title, ["year"] = c.Year, ["season"] = c.Season,
+        ["episodes"] = Arr(c.Episodes), ["episode_titles"] = Arr(c.EpisodeTitles), ["runtime"] = c.Runtime,
+        ["score"] = c.Score, ["why"] = Arr(c.Why),
+    };
+
+    private static JsonObject ParsedJson(Parsed p) => new()
+    {
+        ["title"] = p.Title, ["year"] = p.Year, ["season"] = p.Season, ["episodes"] = Arr(p.Episodes),
+        ["episode_title"] = p.EpisodeTitle, ["is_episode"] = p.IsEpisode,
+    };
+
+    private static JsonObject MatchJson(TitleMatch m)
+    {
+        var p = ParsedJson(m.Parsed);
+        p.Remove("is_episode");
+        return new JsonObject
+        {
+            ["parsed"] = p, ["choices"] = new JsonArray(m.Choices.Select(c => (JsonNode)ChoiceJson(c)).ToArray()),
+            ["confident"] = m.Confident, ["note"] = m.Note,
+        };
+    }
+
+    private static JsonObject NamingCases(JsonObject c)
+    {
+        var pools = c["pools"]!.AsObject();
+        ITmdb Api(string k) => new FakeTmdb(pools[k]!.AsObject());
+        var names = c["names"]!.AsArray().Select(x => Str(x)!).ToList();
+        var outp = new JsonObject
+        {
+            ["parse"] = new JsonArray(names.Select(n => (JsonNode)ParsedJson(Naming.Parse(n))).ToArray()),
+            ["safe"] = Arr(c["titles"]!.AsArray().Select(t => Naming.SafeName(Str(t)!))),
+            ["sims"] = Arr(c["sims"]!.AsArray().Select(p => Naming.TitleSimilarity(Str(p![0])!, Str(p[1])!))),
+        };
+        var render = new JsonArray();
+        foreach (var ch in c["choices"]!.AsArray())
+        {
+            var choice = Choice(ch!);
+            var row = new List<string>();
+            foreach (var e in new[] { ".mkv", "mp4" })
+            {
+                foreach (var y in new[] { false, true })
+                    row.Add(Naming.Render(choice, e, y));
+            }
+            row.Add(choice.Label());
+            row.Add(choice.EpisodeCode());
+            render.Add(Arr(row));
+        }
+        outp["render"] = render;
+        var durations = c["durations"]!.AsArray().Select(d => d!.GetValue<double>()).ToList();
+        var match = new JsonArray();
+        var search = new JsonArray();
+        foreach (var k in new[] { "test", "demo" })
+        {
+            foreach (var n in names)
+            {
+                foreach (var d in durations)
+                    match.Add(MatchJson(Naming.MatchTitle(Api(k), n, d)));
+            }
+            foreach (var n in names.Take(12))
+            {
+                var p = Naming.Parse(n);
+                foreach (var s in c["searches"]!.AsArray())
+                    search.Add(new JsonArray(Naming.Search(Api(k), Str(s![0])!, Str(s[1])!, p).Select(x => (JsonNode)ChoiceJson(x)).ToArray()));
+            }
+        }
+        outp["match"] = match;
+        outp["search"] = search;
         return outp;
     }
 

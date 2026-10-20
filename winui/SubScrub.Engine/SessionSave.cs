@@ -397,7 +397,7 @@ public sealed partial class Session
             {
                 Opts = c.Defaults, VideoMode = c.VideoMode, SubMode = c.SubMode, Keep = c.KeepSdh, Default = c.MakeDefault,
                 Name = c.TrackName, Recycle = c.RecycleSub, Overwrite = Config.Truthy(go["overwrite"]), Pref = Pref,
-                DropLangs = c.DropLangs && c.VideoMode == "replace", KeepLang = "eng", BatchId = DateTime.Now.ToString("yyyyMMdd-HHmmss"),
+                DropLangs = c.DropLangs && c.VideoMode == "replace", KeepLang = "eng", BatchId = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture),
             };
             Log($"Saving {jobs.Count} file(s): video mode={c.VideoMode}, subtitle mode={c.SubMode}, "
                 + $"keep SDH={(cfg.Keep ? "True" : "False")}, default={(cfg.Default ? "True" : "False")}, uncertain lines={policy}");
