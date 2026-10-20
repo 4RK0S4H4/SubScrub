@@ -362,7 +362,8 @@ public sealed partial class Session
         var t = Tools;
         return new JsonObject
         {
-            ["ffmpeg"] = t.Ffmpeg ?? "", ["ffprobe"] = t.Ffprobe ?? "", ["mkvmerge"] = t.Mkvmerge ?? "", ["ready"] = t.Ready,
+            ["ffmpeg"] = t.Ffmpeg ?? "", ["ffprobe"] = t.Ffprobe ?? "", ["mkvmerge"] = t.Mkvmerge ?? "",
+            ["mkvextract"] = t.Mkvextract ?? "", ["mkvpropedit"] = t.Mkvpropedit ?? "", ["ready"] = t.Ready,
         };
     }
 

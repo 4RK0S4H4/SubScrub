@@ -94,6 +94,13 @@ internal static class GoldenParity
         }
         foreach (var p in problems.Take(40))
             Console.WriteLine("  DIFF " + p);
+        if (Environment.GetEnvironmentVariable("GOLDEN_DIFFS") is { Length: > 0 } all)
+            File.WriteAllLines($"{all}.{what}.txt", problems);       // every difference, for reading them all
+        // where they are, with list positions folded together, so a large but uniform change reads at a glance
+        Console.WriteLine("  by place:");
+        foreach (var g in problems.GroupBy(p => Regex.Replace(p[..Math.Max(0, p.IndexOf(':'))], @"\[\d+\]", "[*]"))
+                     .OrderByDescending(g => g.Count()).Take(25))
+            Console.WriteLine($"    {g.Count(),6}  {g.Key}");
         if (update)
         {
             golden["expected"] = got!.DeepClone();
@@ -234,8 +241,6 @@ internal static class GoldenParity
     /// <summary>tools/engine_parity.py's diff: true is not 1, 3 is 3.0, keys in sorted order.</summary>
     private static void Diff(JsonNode? a, JsonNode? b, string path, List<string> outp)
     {
-        if (outp.Count > 200)
-            return;
         bool IsBool(JsonNode? n) => n is JsonValue v && v.GetValueKind() is JsonValueKind.True or JsonValueKind.False;
         if (IsBool(a) || IsBool(b))
         {

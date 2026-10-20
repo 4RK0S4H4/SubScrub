@@ -151,7 +151,8 @@ public sealed class Commands
                 return new JsonObject
                 {
                     ["ffmpeg"] = Media.ToolVersion(found.Ffmpeg), ["ffprobe"] = Media.ToolVersion(found.Ffprobe),
-                    ["mkvmerge"] = Media.ToolVersion(found.Mkvmerge),
+                    ["mkvmerge"] = Media.ToolVersion(found.Mkvmerge), ["mkvextract"] = Media.ToolVersion(found.Mkvextract),
+                    ["mkvpropedit"] = Media.ToolVersion(found.Mkvpropedit),
                 };
             case "winget_install": return WingetInstall(S(a, "id") ?? "");
             case "add": return s.Add(L(a, "paths"));

@@ -497,7 +497,7 @@ public static partial class Media
                                    + "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>\n"
                                    + "<Simple><Name>SUBSCRUB</Name><String>cleaned</String></Simple></Tag></Tags>\n";
 
-    private static readonly Regex GuiProgress = new(@"\A#GUI#progress (\d+)%");
+    internal static readonly Regex GuiProgress = new(@"\A#GUI#progress (\d+)%");
 
     private static void MuxMkvmerge(Tools tools, MediaInfo info, SubTrack? track, HashSet<int> drop, string? subPath, string outPath,
                                     string lang, string name, SaveOptions opts, Action<double, string>? onProgress,
@@ -583,7 +583,13 @@ public static partial class Media
             "-i", info.Path,
         };
         if (subPath != null)
+        {
+            // the cleaned text has the stored times; FFmpeg moves the video by the container's start time when that is
+            // negative, so move the new track with it
+            if (info.StartTime < 0)
+                cmd.AddRange(["-itsoffset", (-info.StartTime).ToString("0.######", CultureInfo.InvariantCulture)]);
             cmd.AddRange(["-i", subPath]);
+        }
         var mapped = info.Streams.Where(s => !(JStr(s["codec_type"]) is "data" or "attachment" && outKind != "mkv")).ToList();
         var subsIdx = mapped.Where(s => JStr(s["codec_type"]) == "subtitle" && !drop.Contains(StreamIndex(s))).Select(StreamIndex).ToList();
         var mainIdx = mapped.Where(s => JStr(s["codec_type"]) is "video" or "audio").Select(StreamIndex).ToList();

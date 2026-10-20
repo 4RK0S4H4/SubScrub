@@ -10,6 +10,8 @@ public sealed class Tools
     public string? Ffmpeg { get; set; }
     public string? Ffprobe { get; set; }
     public string? Mkvmerge { get; set; }
+    public string? Mkvextract { get; set; }         // MKVToolNix: reads subtitle tracks without demuxing the whole file
+    public string? Mkvpropedit { get; set; }        // MKVToolNix: changes track flags and names in place
 
     public bool Ready => !string.IsNullOrEmpty(Ffmpeg) && !string.IsNullOrEmpty(Ffprobe);
 }
@@ -62,6 +64,7 @@ public sealed class MediaInfo
     public List<SubTrack> Subs { get; set; } = [];
     public string? Companion { get; set; }          // a standalone subtitle file: the video it belongs to
     public int Chapters { get; set; }
+    public double StartTime { get; set; }           // the container's first timestamp (negative after encoder delay)
 
     public string Name => PyPath.Name(Path);
 

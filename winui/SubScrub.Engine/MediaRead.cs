@@ -182,7 +182,11 @@ public static partial class Media
         var ffmpeg = FindTool("ffmpeg", O("ffmpeg"));
         var ffprobe = FindTool("ffprobe", O("ffprobe"), ffmpeg);
         var mkvmerge = FindTool("mkvmerge", O("mkvmerge"));
-        return new Tools { Ffmpeg = ffmpeg, Ffprobe = ffprobe, Mkvmerge = mkvmerge };
+        return new Tools
+        {
+            Ffmpeg = ffmpeg, Ffprobe = ffprobe, Mkvmerge = mkvmerge,
+            Mkvextract = FindTool("mkvextract", O("mkvextract"), mkvmerge), Mkvpropedit = FindTool("mkvpropedit", O("mkvpropedit"), mkvmerge),
+        };
     }
 
     private static readonly Regex VersionRe = new(@"version (\S+)|v(\d+\.\d+(?:\.\d+)?)");
@@ -412,7 +416,7 @@ public static partial class Media
         {
             Path = path, Kind = ContainerKind(path), FormatName = fmt.ContainsKey("format_name") ? JStr(fmt["format_name"]) : "",
             Duration = duration, Size = size, Streams = streams, Subs = subs,
-            Chapters = (data["chapters"] as JsonArray)?.Count ?? 0,
+            Chapters = (data["chapters"] as JsonArray)?.Count ?? 0, StartTime = PyFloat(fmt["start_time"]) ?? 0.0,
         };
     }
 
@@ -441,10 +445,34 @@ public static partial class Media
             return [];
         Directory.CreateDirectory(outDir);
         var paths = tracks.ToDictionary(t => t.Index, t => PyPath.Join(outDir, $"track{t.Index}.{t.Fmt}"));
+        if (info.Kind == "mkv" && !string.IsNullOrEmpty(tools.Mkvextract))
+        {
+            // mkvextract reads only the subtitle blocks, and writes the stored text and times as they are
+            try
+            {
+                var mx = new List<string> { tools.Mkvextract, "--gui-mode", info.Path, "tracks" };
+                mx.AddRange(tracks.Select(t => $"{t.Index}:{paths[t.Index]}"));
+                RunStream(mx, line =>
+                {
+                    var m = GuiProgress.Match(line);
+                    if (m.Success && onProgress != null)
+                        onProgress(int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) / 100.0, "Reading subtitles");
+                }, log, cancel, [0, 1]);                 // 1 = finished with warnings
+                if (paths.Values.All(Path.Exists))
+                    return paths;
+                log?.Invoke("mkvextract left tracks out; reading them with FFmpeg instead.");
+            }
+            catch (ToolError e)
+            {
+                log?.Invoke($"mkvextract failed ({e.Message}); reading the tracks with FFmpeg instead.");
+            }
+        }
+        // -copyts: the times as stored, as mkvextract gives them (FFmpeg would otherwise move them by the container's
+        // start time, which put the cleaned track out of step after an mkvmerge remux)
         var cmd = new List<string>
         {
             tools.Ffmpeg ?? "ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
-            "-i", info.Path,
+            "-copyts", "-i", info.Path,
         };
         foreach (var t in tracks)
             cmd.AddRange(["-map", $"0:{t.Index}", "-c:s", TextCodecs[t.Codec].Codec, paths[t.Index]]);

@@ -998,4 +998,84 @@ internal static class Tests
             s.Close();
         }
     }
+
+    // ================================================================ reading with mkvextract, and the timing (#46)
+
+    /// <summary>When the first line of each subtitle track starts, measured from the start of the video.</summary>
+    private static List<double> SubtitleOffsets(string path)
+    {
+        string Probe(params string[] args)
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(ToolsFound.Ffprobe!) { RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var a in args)
+                info.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(info)!;
+            var o = p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+            return o;
+        }
+        double D(string x) => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        var video = D(Probe("-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "csv=p=0", path));
+        var subs = Probe("-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", path)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        return subs.Select(i => Math.Round(D(Probe("-v", "error", "-select_streams", i.Trim(), "-read_intervals", "%+#1",
+            "-show_entries", "packet=pts_time", "-of", "csv=p=0", path).Split('\n')[0]) - video, 3)).ToList();
+    }
+
+    public static void TestCleanedTrackKeepsItsTiming()
+    {
+        NeedTools();
+        var lib = Path.Combine(Root, "samples", "library");
+        if (!Directory.Exists(lib) || string.IsNullOrEmpty(ToolsFound.Mkvmerge))
+            throw new Skip("needs the sample library and MKVToolNix");
+        var source = Directory.EnumerateFiles(lib, "Dune*.mkv").First();      // starts at -0.128 s (encoder delay)
+        var expected = SubtitleOffsets(source)[0];
+        foreach (var (label, tools) in new[] { ("mkvmerge", ToolsFound), ("ffmpeg", new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe }) })
+        {
+            var d = NewDir("timing-" + label);
+            var mkv = Path.Combine(d, Path.GetFileName(source));
+            File.Copy(source, mkv);
+            var info = Media.Probe(tools, mkv);
+            Check(info.StartTime < 0, "the sample starts before zero");
+            var track = info.Subs[0];
+            var doc = SubFormats.Load(Media.ExtractSubs(tools, info, [track], Path.Combine(d, "x"))[track.Index], track.Fmt);
+            Check(doc.Cues[0].Start == "00:00:04,000", $"{label}: read with the stored times, got {doc.Cues[0].Start}");
+            var text = Cleaner.CleanDoc(doc, new CleanOptions(), null).Render();
+            var res = Media.Save(tools, info, track, text, track.Fmt, new SaveOptions { Mode = "new", KeepOriginal = true });
+            var got = SubtitleOffsets(res.Path);
+            Check(got.All(o => Math.Abs(o - expected) < 0.002), $"{label}: the tracks start at {string.Join(", ", got)} s from the video, not {expected}");
+        }
+    }
+
+    public static void TestMkvextractAndFfmpegReadTheSameLines()
+    {
+        NeedTools();
+        if (string.IsNullOrEmpty(ToolsFound.Mkvextract))
+            throw new Skip("needs MKVToolNix");
+        var videos = new[] { "library", "edge" }.Select(x => Path.Combine(Root, "samples", x)).Where(Directory.Exists)
+            .SelectMany(x => Directory.EnumerateFiles(x, "*.mkv", SearchOption.AllDirectories))
+            .Append(Path.Combine(Root, "samples", "Sample (SDH test).mkv")).Where(File.Exists).ToList();
+        if (videos.Count < 5)
+            throw new Skip("run python -m tests.make_samples (--library, --edge) first");
+        var ffOnly = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe };
+        var tracks = 0;
+        foreach (var v in videos)
+        {
+            var info = Media.Probe(ToolsFound, v);
+            var a = Media.ExtractSubs(ToolsFound, info, info.Subs, NewDir("mx"));
+            var b = Media.ExtractSubs(ffOnly, info, info.Subs, NewDir("ff"));
+            Check(a.Keys.Order().SequenceEqual(b.Keys.Order()), $"{v}: the same tracks");
+            foreach (var t in info.Subs.Where(t => a.ContainsKey(t.Index)))
+            {
+                var (da, db) = (SubFormats.Load(a[t.Index], t.Fmt), SubFormats.Load(b[t.Index], t.Fmt));
+                Check(da.Cues.Select(c => (c.Start, c.End, c.Text)).SequenceEqual(db.Cues.Select(c => (c.Start, c.End, c.Text))),
+                      $"{Path.GetFileName(v)} track {t.Index}: the lines or times differ");
+                var (ca, cb) = (Cleaner.CleanDoc(da, new CleanOptions(), null), Cleaner.CleanDoc(db, new CleanOptions(), null));
+                Check(ca.Results.Select(r => (r.Text, r.Risk)).SequenceEqual(cb.Results.Select(r => (r.Text, r.Risk))),
+                      $"{Path.GetFileName(v)} track {t.Index}: cleaned differently");
+                tracks++;
+            }
+        }
+        Check(tracks >= 15, $"{tracks} tracks compared");
+    }
 }

@@ -56,6 +56,9 @@ def main():
     if "--edge" in sys.argv:
         edge_cases(tools, ROOT / "samples" / "edge")
         return
+    if "--big" in sys.argv:
+        print(f"Made:\n  {big_sample(tools, ROOT / 'samples' / 'big')}")
+        return
     out = ROOT / "samples"
     out.mkdir(exist_ok=True)
     mkv, mp4 = pipeline_samples(tools, out)
@@ -302,6 +305,29 @@ def _video(run, tools, out: Path, minutes: float, subs: list[tuple[Path, str, st
         cmd += [f"-metadata:s:s:{k}", f"language={lang}", f"-metadata:s:s:{k}", f"title={title}",
                 f"-disposition:s:{k}", disp]
     run(cmd + ["-shortest", str(out)])
+
+
+def big_sample(tools, out: Path, gigabytes: float = 1.0) -> Path:
+    """A feature-length 1080p MKV of about a gigabyte with a long SDH track, for timing how long reading takes: one
+    minute of video is encoded once and appended to itself (no re-encoding), then the subtitles are added."""
+    if not tools.mkvmerge:
+        sys.exit("--big needs MKVToolNix (mkvmerge).")
+    run = _runner(tools)
+    out.mkdir(parents=True, exist_ok=True)
+    chunk = out / "_chunk.mkv"
+    run([tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "60", "-c:v", "libx264", "-preset", "ultrafast",
+         "-b:v", "900k", "-maxrate", "900k", "-bufsize", "1800k", "-c:a", "aac", "-b:a", "128k", str(chunk)])
+    copies = max(1, round(gigabytes * 1e9 / chunk.stat().st_size))
+    srt = out / "_subs.srt"
+    _srt(srt, copies, seed=99, sdh=True)
+    final = out / "Big.Feature.2023.1080p.BluRay.x264.mkv"
+    cmd = [tools.mkvmerge, "-q", "-o", str(final), str(chunk)] + [x for _ in range(copies - 1) for x in ("+", str(chunk))]
+    cmd += ["--language", "0:eng", "--track-name", "0:English SDH", str(srt)]
+    run(cmd)
+    chunk.unlink()
+    srt.unlink()
+    return final
 
 
 def library(tools):

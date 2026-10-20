@@ -1224,9 +1224,12 @@ public sealed partial class MainWindow : Window
             {
                 Key = "tools", Title = "Tools",
                 Text = "FFmpeg is required. MKVToolNix is optional but recommended: it's the most faithful way to rewrite MKV "
-                       + "files (it keeps every tag, chapter and attachment exactly as they were). Nothing is re-encoded.",
+                       + "files (it keeps every tag, chapter and attachment exactly as they were), it reads their subtitles "
+                       + "with the exact stored times, and it changes track names and flags without rewriting the file. "
+                       + "Nothing is re-encoded.",
                 Rows = [["FFmpeg", Row(t.Ffmpeg, "ffmpeg", false)], ["FFprobe", Row(t.Ffprobe, "ffprobe", false)],
-                        ["MKVToolNix", Row(t.Mkvmerge, "mkvmerge", true)]],
+                        ["MKVToolNix", Row(t.Mkvmerge, "mkvmerge", true)], ["mkvextract", Row(t.Mkvextract, "mkvextract", true)],
+                        ["mkvpropedit", Row(t.Mkvpropedit, "mkvpropedit", true)]],
                 Detail = t.Ready && t.Mkvmerge.Length > 0 ? ""
                     : "The install buttons run Windows' package manager (winget) in its own window; SubScrub looks again when it finishes.",
                 Buttons = buttons,
