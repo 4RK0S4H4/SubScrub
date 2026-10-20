@@ -29,6 +29,8 @@ internal static class SessionParity
             output["saving"] = Saving(saving);
         if (cases["naming"] is JsonObject naming)
             output["naming"] = NamingCases(naming);
+        if (cases["commands"] is JsonObject commands)
+            output["commands"] = CommandsCase(commands);
         File.WriteAllText(outPath, output.ToJsonString(Session.JsonOut));
     }
 
@@ -477,6 +479,54 @@ internal static class SessionParity
             outp.Add(SavedView(full, dir, res, err));
         }
         return outp;
+    }
+
+    // ================================================================ the commands, end to end
+
+    private static JsonArray CommandsCase(JsonObject c)
+    {
+        var dir = Str(c["dir"])!;
+        var lib = Path.Combine(dir, "lib");
+        var engine = new Commands("parity", Path.Combine(dir, "settings.json"), demoTmdb: true);
+        var got = new JsonArray();
+        foreach (var step in c["script"]!.AsArray())
+        {
+            var cmd = Str(step![0])!;
+            var args = JsonNode.Parse(step[1]!.ToJsonString(Session.JsonOut).Replace("<lib>", JsonValue.Create(lib)!.ToJsonString(Session.JsonOut)[1..^1]))!.AsObject();
+            try
+            {
+                if (cmd == "review_all")
+                {
+                    var views = new JsonArray();
+                    foreach (var r in engine.Session.FilesView()["rows"]!.AsArray())
+                        views.Add(engine.Session.Review(r!["uid"]!.GetValue<int>(), null, true));
+                    got.Add(views);
+                }
+                else if (cmd == "save_walk")
+                {
+                    var ans = new JsonObject();
+                    var outp = new JsonArray();
+                    for (var k = 0; k < 10; k++)
+                    {
+                        var q = engine.Run("save", new JsonObject { ["answers"] = ans.DeepClone() })!.AsObject();
+                        outp.Add(q);
+                        if (q["ask"] is not JsonObject ask)
+                            break;
+                        var key = Str(ask["key"])!;
+                        ans[key] = args["answers"]![key]!.DeepClone();
+                    }
+                    got.Add(outp);
+                }
+                else
+                    got.Add(engine.Run(cmd, args)?.DeepClone());
+            }
+            catch (Exception e) when (e is InvalidOperationException)
+            {
+                got.Add(new JsonObject { ["error"] = e.Message });
+            }
+        }
+        engine.Close();
+        return got;
     }
 
     // ================================================================ names

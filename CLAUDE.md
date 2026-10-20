@@ -108,8 +108,9 @@ can't push tags, so don't try `git push` of a tag.)
   tiles, the settings nav, rounded tooltips (`set_tip`) and menus (`make_menu`), Solar icon drawing.
 - `subscrub/ui/solar.py`: Solar icon SVGs (CC BY 4.0). `subscrub/ui/fonts.py`: Inter as base64 (OFL).
 - `subscrub/core.py`: the Qt window's logic without Qt (file list, verdicts, Review data, questions at save time, the
-  batch save). `subscrub/helper.py`: drives it over JSON lines on stdin/stdout; bundled as `subscrub-core.exe`
-  (`run_core.py`) for the WinUI app. Keep `core.py` in step with `ui/main_window.py` when behaviour changes.
+  batch save). `subscrub/helper.py`: drives it over JSON lines on stdin/stdout (the protocol the WinUI app's engine
+  answers in-process). Keep `core.py` in step with `ui/main_window.py` and with the C# `Session` when behaviour
+  changes: `tools/engine_parity.py` compares them.
 - `winui/SubScrub.Engine/`: the engine being ported to C# in stages (the cleaner and subtitle formats, then the file
   list's logic and views). It must match the Python engine exactly (`tools/cleaner_parity.py` and
   `tools/engine_parity.py`, run in CI on Linux and Windows): a change to a rule, a wording or a view goes into the
