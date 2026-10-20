@@ -298,7 +298,7 @@ public sealed partial class Session
     public (string Text, double Frac) SaveStatus { get; set; } = ("", -1.0);
 
     /// <summary>Which other programs have these files open ({path: ["qBittorrent"]}); empty when nothing does.</summary>
-    public Func<List<string>, Dictionary<string, List<string>>> WhoHasOpen { get; set; } = _ => [];
+    public Func<List<string>, Dictionary<string, List<string>>> WhoHasOpen { get; set; } = paths => Media.WhoHasOpen(paths);
 
     /// <summary>Sends an event to the window ("files", "review_changed", "save_done").</summary>
     public Action<string, JsonNode?> Emit { get; set; } = (_, _) => { };

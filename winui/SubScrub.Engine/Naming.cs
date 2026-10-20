@@ -119,3 +119,132 @@ public static partial class Naming
         return Py.Strip($"{show} {code}") + ext;
     }
 }
+
+/// <summary>The rename history, for Undo: %LOCALAPPDATA%\SubScrub\renames.jsonl, one JSON object per line, written
+/// the way the Python app writes it so either app can undo the other's renames.</summary>
+public static class RenameHistory
+{
+    public static string HistoryPath()
+    {
+        var b = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrEmpty(b))
+            b = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+        var p = Path.Combine(b, "SubScrub");
+        Directory.CreateDirectory(p);
+        return Path.Combine(p, "renames.jsonl");
+    }
+
+    /// <summary>json.dumps of a flat object (ASCII only, ", " and ": " between items), as Python writes it.</summary>
+    public static string Dumps(IEnumerable<(string Key, object Value)> items)
+    {
+        var sb = new System.Text.StringBuilder("{");
+        var first = true;
+        foreach (var (k, v) in items)
+        {
+            if (!first)
+                sb.Append(", ");
+            first = false;
+            Str(sb, k);
+            sb.Append(": ");
+            switch (v)
+            {
+                case bool b: sb.Append(b ? "true" : "false"); break;
+                case string s: Str(sb, s); break;
+                default: sb.Append(System.Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)); break;
+            }
+        }
+        return sb.Append('}').ToString();
+    }
+
+    private static void Str(System.Text.StringBuilder sb, string s)
+    {
+        sb.Append('"');
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                case '\b': sb.Append("\\b"); break;
+                case '\f': sb.Append("\\f"); break;
+                default:
+                    if (c < 0x20 || c > 0x7E)
+                        sb.Append($"\\u{(int)c:x4}");
+                    else
+                        sb.Append(c);
+                    break;
+            }
+        }
+        sb.Append('"');
+    }
+
+    public static void Record(string batchId, string oldPath, string newPath)
+    {
+        try
+        {
+            File.AppendAllText(HistoryPath(), Dumps([("batch", batchId), ("time", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")),
+                                                     ("old", oldPath), ("new", newPath)]) + "\n", new System.Text.UTF8Encoding(false));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static List<System.Text.Json.Nodes.JsonObject>? ReadAll()
+    {
+        try
+        {
+            var text = File.ReadAllText(HistoryPath(), System.Text.Encoding.UTF8);
+            return text.Split('\n').Select(x => x.TrimEnd('\r')).Where(x => Py.Strip(x).Length > 0)
+                .Select(x => System.Text.Json.Nodes.JsonNode.Parse(x)!.AsObject()).ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
+                                      or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string S(System.Text.Json.Nodes.JsonObject r, string k) =>
+        r[k] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
+
+    /// <summary>The renames of the last batch that wasn't undone: (batch, time, old, new) rows.</summary>
+    public static List<(string Batch, string Time, string Old, string New)> LastBatch()
+    {
+        var rows = ReadAll();
+        if (rows == null)
+            return [];
+        rows = rows.Where(r => !(r["undone"] is System.Text.Json.Nodes.JsonValue u && Session_Truthy(u))).ToList();
+        if (rows.Count == 0)
+            return [];
+        var bid = S(rows[^1], "batch");
+        return rows.Where(r => S(r, "batch") == bid).Select(r => (S(r, "batch"), S(r, "time"), S(r, "old"), S(r, "new"))).ToList();
+    }
+
+    private static bool Session_Truthy(System.Text.Json.Nodes.JsonNode n) => Config.Truthy(n);
+
+    public static void MarkUndone(string batchId)
+    {
+        try
+        {
+            var rows = ReadAll();
+            if (rows == null)
+                return;
+            var sb = new System.Text.StringBuilder();
+            foreach (var r in rows)
+            {
+                if (S(r, "batch") == batchId)
+                    r["undone"] = true;
+                sb.Append(Dumps(r.Select(kv => (kv.Key, (object)(kv.Value is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<bool>(out var b) ? b : (object)S(r, kv.Key))))));
+                sb.Append('\n');
+            }
+            File.WriteAllText(HistoryPath(), sb.ToString(), new System.Text.UTF8Encoding(false));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+}

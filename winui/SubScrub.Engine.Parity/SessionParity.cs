@@ -25,6 +25,8 @@ internal static class SessionParity
         output["sessions"] = sessions;
         if (cases["reading"] is JsonObject reading)
             output["reading"] = Reading(reading);
+        if (cases["saving"] is JsonArray saving)
+            output["saving"] = Saving(saving);
         File.WriteAllText(outPath, output.ToJsonString(Session.JsonOut));
     }
 
@@ -390,6 +392,88 @@ internal static class SessionParity
         outp["leftovers"] = new JsonArray(c["leftovers"]!.AsArray().Select(p => (JsonNode)new JsonArray(
             Media.FindLeftovers(p!.AsArray().Select(x => Str(x)!)).Select(x => (JsonNode)new JsonArray(x.Path, x.Original, x.Size, x.Name)).ToArray())).ToArray());
         outp["restore"] = Media.RestoreLeftover(Media.FindLeftovers([Str(c["restore"])!])[0]);
+        return outp;
+    }
+
+    // ================================================================ saving
+
+    private static JsonObject SavedView(Tools tools, string folder, SaveResult? res, string? err)
+    {
+        string Rel(string? t) => (t ?? "").Replace(folder, "<dir>");
+        var outp = new JsonObject
+        {
+            ["error"] = Rel(err), ["path"] = res != null ? Rel(res.Path) : null, ["note"] = res != null ? Rel(res.Note) : null,
+            ["files"] = Arr(Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order(PyFmt.Order)),
+        };
+        if (res != null && Media.VideoExts.Contains(PyPath.Suffix(res.Path).ToLowerInvariant()) && File.Exists(res.Path))
+        {
+            var info = Media.Probe(tools, res.Path);
+            outp["streams"] = new JsonArray(info.Streams.Select(s => (JsonNode)new JsonArray(s["codec_type"]?.DeepClone(), s["codec_name"]?.DeepClone())).ToArray());
+            outp["subs"] = new JsonArray(info.Subs.Select(t => (JsonNode)TrackJson(t)).ToArray());
+            outp["chapters"] = info.Chapters;
+            outp["kind"] = info.Kind;
+            var tmp = Path.Combine(folder, "_x");
+            var got = Media.ExtractSubs(tools, info, info.Subs, tmp);
+            outp["texts"] = new JsonObject(got.OrderBy(kv => kv.Key).Select(kv => KeyValuePair.Create(kv.Key.ToString(),
+                (JsonNode?)new System.Text.UTF8Encoding(false).GetString(File.ReadAllBytes(kv.Value)).Replace("\r\n", "\n").Replace('\r', '\n'))));
+            if (Directory.Exists(tmp))
+                Directory.Delete(tmp, true);
+        }
+        else if (res != null && File.Exists(res.Path))
+            outp["text"] = new System.Text.UTF8Encoding(false).GetString(File.ReadAllBytes(res.Path));
+        return outp;
+    }
+
+    private static JsonArray Saving(JsonArray jobs)
+    {
+        var full = Media.FindTools();
+        var outp = new JsonArray();
+        foreach (var j in jobs)
+        {
+            var dir = Str(j!["dir"])!;
+            var tools = Str(j["tools"]) == "full" ? full : new Tools { Ffmpeg = full.Ffmpeg, Ffprobe = full.Ffprobe };
+            var o = j["opts"]!.AsObject();
+            List<string> Paths(string k) => o[k]!.AsArray().Select(x => Path.Combine(dir, Str(x)!)).ToList();
+            var opts = new SaveOptions
+            {
+                Mode = Str(o["mode"])!, KeepOriginal = Bool(o["keep_original"]), MakeDefault = Bool(o["make_default"]),
+                TrackName = Str(o["track_name"]) ?? "", Language = Str(o["language"]) ?? "", OverwriteSidecar = Bool(o["overwrite_sidecar"]),
+                RecycleSourceSub = Bool(o["recycle_source_sub"]), RecyclePaths = Paths("recycle_paths"),
+                DropOtherLanguages = Bool(o["drop_other_languages"]), KeepLanguage = Str(o["keep_language"]) ?? "eng",
+                RenameTo = Str(o["rename_to"]) ?? "", RenameSidecars = Paths("rename_sidecars"),
+            };
+            SaveResult? res = null;
+            string? err = null;
+            try
+            {
+                var path = Path.Combine(dir, Str(j["video"])!);
+                if (Str(j["kind"]) == "sub")
+                {
+                    var (sinfo, _) = Media.ProbeSubtitleFile(path);
+                    res = Media.Save(tools, sinfo, sinfo.Subs[0], Str(j["text"])!, Str(j["fmt"])!, opts);
+                }
+                else
+                {
+                    var info = Media.Probe(tools, path);
+                    if (Str(j["kind"]) == "tidy")
+                        res = Media.TidyOrRename(tools, info, opts);
+                    else
+                    {
+                        SubTrack track;
+                        if (Str(j["external"]) is { Length: > 0 } ext)
+                            track = Media.SidecarTrack(Path.Combine(dir, ext), Int(j["track"])!.Value - Media.SidecarBase).Track;
+                        else
+                            track = info.Subs.First(t => t.Index == Int(j["track"]));
+                        res = Media.Save(tools, info, track, Str(j["text"])!, Str(j["fmt"])!, opts);
+                    }
+                }
+            }
+            catch (Exception e) when (e is ToolError or IOException or UnauthorizedAccessException)
+            {
+                err = e.Message;
+            }
+            outp.Add(SavedView(full, dir, res, err));
+        }
         return outp;
     }
 

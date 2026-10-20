@@ -64,7 +64,8 @@ python -m tests.test_pipeline                                    # makes its own
 python -m tests.test_edge                                        # awkward files through the real save path
 python -m tests.test_helper                                      # the WinUI app's engine helper: JSON protocol, parity, a save
 python tools/cleaner_parity.py [--library samples/library]      # the C# engine must clean exactly like the Python one (.NET 8 SDK)
-python tools/engine_parity.py --library samples/library         # ...and give the same file list, Review and save questions
+python tools/engine_parity.py --library samples/library         # ...and read, list, review and save files the same way
+dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .  # the C# engine's own save tests (make_samples, --edge first)
 
 python -m tests.make_samples                                    # makes samples/Sample (SDH test).mkv/.mp4 (ffmpeg)
 python -m tests.make_samples --library                          # samples/library: 6 realistic videos in every state

@@ -1,6 +1,8 @@
 """Check that the C# engine (winui/SubScrub.Engine) gives exactly what the Python one gives, beyond the cleaner:
 the file list's logic (subscrub/batch.py), the views of subscrub/core.py (stage 2 of the port) and reading files:
-finding the tools, ffprobe, extracting the tracks, subtitle files on their own, unfinished copies (stage 3).
+finding the tools, ffprobe, extracting the tracks, subtitle files on their own, unfinished copies (stage 3), and
+saving: the same saves (every mode, both tools, renames, other languages removed) on two copies of each input, one by
+each engine, then the files, tracks, flags and text they wrote compared (stage 4).
 
     python tools/engine_parity.py --library samples/library [--keep <folder>]
 
@@ -570,6 +572,124 @@ def reading_cases(tmp: Path) -> tuple[dict, dict]:
     return cases, exp
 
 
+# ============================================================================ saving (stage 4)
+
+SAVE_OPTS = [
+    ("replace", {}),
+    ("new, SDH kept", {"mode": "new", "keep_original": True}),
+    ("subtitle file", {"mode": "sidecar"}),
+    ("replace, not the default, renamed, other languages out", {"make_default": False, "drop_other_languages": True,
+                                                                "rename_to": "Renamed Title.mkv", "track_name": "Clean"}),
+]
+
+
+def saved_view(tools, folder: Path, res, err) -> dict:
+    """What a save left behind: the result, every file in the folder, and the tracks of the saved video."""
+    rel = lambda t: (t or "").replace(str(folder), "<dir>")  # noqa: E731
+    out = {"error": rel(err), "path": rel(res.path) if res else None, "note": rel(res.note) if res else None,
+           "files": sorted(p.name for p in folder.iterdir())}
+    if res and Path(res.path).suffix.lower() in media.VIDEO_EXTS and Path(res.path).exists():
+        info = media.probe(tools, res.path)
+        out["streams"] = [[s.get("codec_type"), s.get("codec_name")] for s in info.streams]
+        out["subs"] = [track_json(t) for t in info.subs]
+        out["chapters"], out["kind"] = info.chapters, info.kind
+        tmp = folder / "_x"
+        got = media.extract_subs(tools, info, info.subs, str(tmp))
+        out["texts"] = {str(k): Path(v).read_text(encoding="utf-8", errors="replace") for k, v in sorted(got.items())}
+        shutil.rmtree(tmp, ignore_errors=True)
+    elif res and Path(res.path).exists():
+        out["text"] = Path(res.path).read_bytes().decode("utf-8", "replace")
+    return out
+
+
+def saving_cases(library: Path, tmp: Path) -> tuple[list, list]:
+    """The same saves on two copies of each input: Python writes one, C# the other (with the cleaned text Python
+    made, so only the saving is compared)."""
+    from subscrub.cleaner import CleanOptions, clean_doc
+    full = media.find_tools()
+    tools_of = {"full": full, "ffmpeg": media.Tools(full.ffmpeg, full.ffprobe, None)}
+    root = tmp / "saving"
+    sources = [p for p in sorted(library.glob("*.mkv"))]
+    sources += sorted((tmp / "edge").rglob("*.mkv"))
+    samples = ROOT / "samples"
+    sources += [p for p in (samples / "Sample (SDH test).mkv", samples / "Sample (SDH test).mp4") if p.exists()]
+    jobs, expected = [], []
+    n = 0
+
+    def pair(src_files: list[Path]) -> tuple[Path, Path]:
+        nonlocal n
+        n += 1
+        a, b = root / f"{n}-py", root / f"{n}-cs"
+        for d in (a, b):
+            d.mkdir(parents=True)
+            for f in src_files:
+                shutil.copy(f, d / f.name)
+        return a, b
+
+    for src in sources:
+        sidecars = [f for f in src.parent.iterdir() if f.suffix.lower() in media.TEXT_SUB_EXTS
+                    and f.name.lower().startswith(src.stem.lower())]
+        for tname in ("full", "ffmpeg"):
+            tools = tools_of[tname]
+            for label, o in SAVE_OPTS:
+                if tname == "ffmpeg" and label.startswith("subtitle file"):
+                    continue
+                a, b = pair([src] + sidecars)
+                v = a / src.name
+                it = batch.Item(path=str(v), kind="video")
+                it.info = media.probe(tools, str(v))
+                got = media.extract_subs(tools, it.info, it.info.subs, str(tmp / "x" / str(n)))
+                it.docs = {t.index: sf.load(got[t.index], t.fmt) for t in it.info.subs if t.index in got}
+                batch.attach_sidecars(it)
+                batch.measure(it)
+                it.sel = batch.pick_track(it, None)
+                tr = it.track()
+                kind = "save"
+                text = None
+                opts = media.SaveOptions(**o)
+                if tr is None or not it.docs.get(tr.index) or not clean_doc(it.docs[tr.index], CleanOptions()).render():
+                    kind = "tidy"
+                    opts = media.SaveOptions(mode="replace", drop_other_languages=True, rename_to=o.get("rename_to", ""))
+                else:
+                    text = batch.clean_item(it, CleanOptions()).render()
+                    opts.language = tr.language
+                    opts.recycle_paths = batch.removable_sidecars(it, False, opts.mode)
+                    opts.rename_sidecars = [t.external for t in it.sidecars]
+                job = {"dir": str(b), "video": src.name, "kind": kind, "tools": tname, "track": tr.index if tr else None,
+                       "external": Path(tr.external).name if tr is not None and tr.external else "",
+                       "text": text, "fmt": tr.fmt if tr else "srt",
+                       "opts": {k: (v if not isinstance(v, list) else [Path(x).name for x in v])
+                                for k, v in opts.__dict__.items()}}
+                res, err = None, None
+                try:
+                    if kind == "tidy":
+                        res = media.tidy_or_rename(tools, it.info, opts)
+                    else:
+                        res = media.save(tools, it.info, tr, text, tr.fmt, opts)
+                except (media.ToolError, OSError) as e:
+                    err = str(e)
+                jobs.append(job)
+                expected.append(saved_view(full, a, res, err))
+    # subtitle files on their own, and next to a video
+    lib_srt = sorted(library.glob("*.srt"))
+    if lib_srt:
+        vid = library / (lib_srt[0].name.split(".eng.")[0] + ".mkv")
+        for mode in ("embed", "replace", "new"):
+            a, b = pair([lib_srt[0], vid] if vid.exists() else [lib_srt[0]])
+            info, doc = media.probe_subtitle_file(str(a / lib_srt[0].name))
+            text = clean_doc(doc, CleanOptions()).render()
+            opts = media.SaveOptions(mode=mode)
+            jobs.append({"dir": str(b), "video": lib_srt[0].name, "kind": "sub", "tools": "full", "track": 0,
+                         "external": "", "text": text, "fmt": doc.fmt, "opts": dict(opts.__dict__)})
+            res, err = None, None
+            try:
+                res = media.save(full, info, info.subs[0], text, doc.fmt, opts)
+            except (media.ToolError, OSError) as e:
+                err = str(e)
+            expected.append(saved_view(full, a, res, err))
+    return jobs, expected
+
+
 # ============================================================================ comparing
 
 def norm(x):
@@ -607,12 +727,14 @@ def main() -> int:
     keep = Path(argv[argv.index("--keep") + 1]) if "--keep" in argv else None
     tmp = Path(tempfile.mkdtemp(prefix="subscrub_engine_parity_"))
     os.environ["LOCALAPPDATA"] = str(tmp / "appdata")          # the rename history of the real save stays here
+    os.environ["XDG_DATA_HOME"] = str(tmp / "xdg")             # and a Linux Recycle Bin
     try:
         sessions, expected_sessions = build_sessions(library, tmp)
         fcases, fexpected = file_cases([tmp / "library", tmp / "edge", tmp / "subs"])
         rcases, rexpected = reading_cases(tmp)
-        cases = {"files": fcases, "sessions": sessions, "reading": rcases}
-        expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected})
+        scases, sexpected = saving_cases(library, tmp)
+        cases = {"files": fcases, "sessions": sessions, "reading": rcases, "saving": scases}
+        expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected, "saving": sexpected})
         (tmp / "cases.json").write_text(json.dumps(cases, ensure_ascii=False, default=str), encoding="utf-8")
         run = subprocess.run(["dotnet", "run", "--project", str(PARITY), "-c", "Release", "--", "session",
                               str(tmp / "cases.json"), str(tmp / "csharp.json")], capture_output=True, text=True)
@@ -631,7 +753,8 @@ def main() -> int:
         n_items = sum(len(c["state"]["items"]) for c in sessions)
         print(f"{len(sessions)} sessions ({n_items} files), {n_ops:,} views and actions, "
               f"{len(fcases['pair']) + len(fcases['subs']) + len(fcases['videos']) + len(fcases['names'])} file cases, "
-              f"{len(rcases['adds'])} fresh reads, {len(rcases['probe'])} videos probed and extracted")
+              f"{len(rcases['adds'])} fresh reads, {len(rcases['probe'])} videos probed and extracted, "
+              f"{len(scases)} saves")
         if problems:
             for p in problems[:40]:
                 print("  DIFF", p)

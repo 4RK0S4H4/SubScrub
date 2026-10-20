@@ -33,8 +33,18 @@ window keeps using the Python helper for anything not ported yet.
   views of `core.py` (`Session.cs`, `SessionReview.cs`, `SessionSave.cs`: verdicts, rows, the summary, Review, the
   questions at save time), returning the same JSON the helper sends. `Media.cs` has the track model and file
   matching, `Naming.cs` the name rendering, `PyLib.cs` Python's formatting, sorting, path rules and difflib.
-- Next: probing and extracting, then muxing and the safe swap, TMDB and the files-in-use check. When the last one is
-  done, the `core` folder goes.
+- Stage 3 (done): reading files (`MediaRead.cs`: finding FFmpeg/MKVToolNix, running them with progress and Stop,
+  ffprobe, extracting the tracks, unfinished copies) and the session's adding and background reading
+  (`SessionLoad.cs`). The parity check reads the same folders from scratch with both engines.
+- Stage 4 (done): saving (`MediaSave.cs`: mkvmerge and FFmpeg remuxes, the check of the new file, the safe swap,
+  renames and the tidy-up; `WinApi.cs`: the Recycle Bin with undo, the Restart Manager "files in use" check, network
+  drives; the rename history in `Naming.cs`, in the same file and format as Python's so Undo works across both apps)
+  and the batch save in `SessionSave.cs`. The parity check runs 122 saves (every mode, both tools) on two copies of
+  each input and compares the files, tracks, flags and text. `SubScrub.Engine.Tests` ports test_swap, test_pipeline
+  and test_edge: `python -m tests.make_samples`, `python -m tests.make_samples --edge`, then
+  `dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .` (CI runs it on Linux and on Windows).
+- Next: TMDB names and the settings in the registry, then the switch to the C# engine. When that is done, the `core`
+  folder goes.
 
 ## Build (Windows)
 
