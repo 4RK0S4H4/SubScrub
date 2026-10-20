@@ -293,4 +293,602 @@ public sealed partial class Session
             bits.Add($"remove other-language subtitles from {PyFmt.Plural(drops, "file")}");
         return bits.Count > 0 ? ", and " + string.Join(" and ", bits) : "";
     }
+
+    // ================================================================ the save itself
+
+    private int _batchTotal, _batchPos;
+    private Dictionary<string, int> _batchCounts = [];
+
+    /// <summary>Ask the next question, or start saving when everything is answered (see SaveQuestion).</summary>
+    public JsonObject Save(int? only = null, JsonObject? answers = null)
+    {
+        var a = (JsonObject?)answers?.DeepClone() ?? [];
+        var q = SaveQuestion(only, a);
+        if (q["go"] is not JsonObject go)
+            return q;
+        Thread? loader;
+        lock (Lock)
+        {
+            if (Busy())
+                return new JsonObject { ["stop"] = true };
+            if (Config.Truthy(a["dont_ask"]))
+            {
+                Cfg.ConfirmReplace = false;
+                Cfg.Save();
+            }
+            _saving = true;                         // from here on nothing else starts reading files
+            _loadCancel.Cancel();
+            loader = _loader;
+        }
+        loader?.Join(TimeSpan.FromSeconds(10));
+        try
+        {
+            return StartBatch(go);
+        }
+        catch
+        {
+            lock (Lock)
+            {
+                _saving = false;
+                Changed(false);
+            }
+            throw;
+        }
+    }
+
+    private sealed class Job
+    {
+        public int Uid;
+        public string Path = "";
+        public string Kind = "";
+        public MediaInfo? Info;
+        public Dictionary<int, SubtitleDoc> Docs = [];
+        public Dictionary<int, int> SdhCounts = [];
+        public int? Sel;
+        public bool Manual;
+        public CleanOptions? Opts;
+        public Dictionary<int, string> Overrides = [];
+        public bool Force;
+        public List<SubTrack> Sidecars = [];
+        public HashSet<string> Dropped = [];
+        public string Policy = "";
+        public string? NewName;
+    }
+
+    private sealed class BatchCfg
+    {
+        public CleanOptions Opts = new();
+        public string VideoMode = "", SubMode = "", Name = "", KeepLang = "eng", BatchId = "";
+        public bool Keep, Default, Recycle, Overwrite, DropLangs;
+        public TrackPref? Pref;
+    }
+
+    private JsonObject StartBatch(JsonObject go)
+    {
+        lock (Lock)
+        {
+            _loader = null;
+            _loadingUid = null;
+            var single = Config.Truthy(go["single"]);
+            var policy = go["policy"]!.GetValue<string>();
+            var items = go["uids"]!.AsArray().Select(u => Item(u!.GetValue<int>())).Where(i => i != null).Select(i => i!).ToList();
+            var jobs = new List<Job>();
+            foreach (var i in items)
+            {
+                if (i.State is "probing" or "reading")
+                {
+                    if (i.Tmpdir != null)
+                        TryDeleteDir(i.Tmpdir);
+                    i.State = "queued";
+                    i.Info = null;
+                    i.Docs = [];
+                    i.Tmpdir = null;
+                }
+                i.Message = "";
+                jobs.Add(new Job
+                {
+                    Uid = i.Uid, Path = i.Path, Kind = i.Kind, Info = i.Info, Docs = i.Docs, SdhCounts = i.SdhCounts, Sel = i.Sel,
+                    Manual = i.Manual, Opts = i.Opts, Overrides = new(i.Overrides), Force = i.Force || (single && i.Kind == "subtitle"),
+                    Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i),
+                });
+            }
+            var c = Cfg;
+            var cfg = new BatchCfg
+            {
+                Opts = c.Defaults, VideoMode = c.VideoMode, SubMode = c.SubMode, Keep = c.KeepSdh, Default = c.MakeDefault,
+                Name = c.TrackName, Recycle = c.RecycleSub, Overwrite = Config.Truthy(go["overwrite"]), Pref = Pref,
+                DropLangs = c.DropLangs && c.VideoMode == "replace", KeepLang = "eng", BatchId = DateTime.Now.ToString("yyyyMMdd-HHmmss"),
+            };
+            Log($"Saving {jobs.Count} file(s): video mode={c.VideoMode}, subtitle mode={c.SubMode}, "
+                + $"keep SDH={(cfg.Keep ? "True" : "False")}, default={(cfg.Default ? "True" : "False")}, uncertain lines={policy}");
+            _saving = true;
+            _saveCancel = new CancellationTokenSource();
+            _batchTotal = jobs.Count;
+            _batchPos = 0;
+            _batchCounts = new() { ["done"] = 0, ["skipped"] = 0, ["failed"] = 0, ["held"] = 0 };
+            SaveStatus = ("Starting…", 0.0);
+            StatusMsg = ("", "");
+            var token = _saveCancel.Token;
+            _saver = new Thread(() => RunBatch(jobs, cfg, token)) { IsBackground = true, Name = "save" };
+            _saver.Start();
+            Changed(true);
+            return new JsonObject { ["started"] = jobs.Count };
+        }
+    }
+
+    public void Cancel()
+    {
+        lock (Lock)
+        {
+            if (Busy())
+            {
+                _saveCancel.Cancel();
+                SaveStatus = ("Stopping…", SaveStatus.Frac);
+                Changed(false);
+            }
+        }
+    }
+
+    private void Overall(double frac, string text)
+    {
+        var n = Math.Max(1, _batchTotal);
+        var prefix = _batchTotal > 1 ? $"{_batchPos + 1} of {_batchTotal}:  " : "";
+        SaveStatus = (prefix + text, (_batchPos + Math.Max(0.0, Math.Min(1.0, frac))) / n);
+        Changed(false);
+    }
+
+    private void RunBatch(List<Job> jobs, BatchCfg cfg, CancellationToken cancel)
+    {
+        try
+        {
+            for (var k = 0; k < jobs.Count; k++)
+            {
+                if (cancel.IsCancellationRequested)
+                    break;
+                var job = jobs[k];
+                var uid = job.Uid;
+                lock (Lock)
+                {
+                    _batchPos = k;
+                    var it0 = Item(uid);
+                    if (it0 != null)
+                    {
+                        it0.State = "saving";
+                        it0.Message = "Starting…";
+                        it0.Progress = -1;
+                    }
+                    Overall(0.0, it0?.Name ?? "");
+                }
+                var prog = Throttled((f, m) =>
+                {
+                    lock (Lock)
+                    {
+                        var x = Item(uid);
+                        if (x == null)
+                            return;
+                        var pct = f >= 0 ? $" {(int)(f * 100)}%" : "";
+                        x.Message = $"{m}{pct}";
+                        x.Progress = f;
+                        Overall(f >= 0 ? f : 0.0, $"{x.Name}, {m.ToLowerInvariant()}{pct}");
+                    }
+                });
+                try
+                {
+                    SaveOne(job, cfg, cancel, prog);
+                }
+                catch (Cancelled)
+                {
+                    JobFailed(uid, CancelledMark);
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    JobFailed(uid, CancelledMark);
+                    break;
+                }
+                catch (Exception e)
+                {
+                    JobFailed(uid, e.Message.Length > 0 ? e.Message : e.GetType().Name);
+                }
+            }
+        }
+        finally
+        {
+            AllDone(cancel.IsCancellationRequested);
+        }
+    }
+
+    private void SaveOne(Job job, BatchCfg cfg, CancellationToken cancel, Action<double, string> prog)
+    {
+        var uid = job.Uid;
+        var it = new Item(job.Path, job.Kind)
+        {
+            Uid = uid, Info = job.Info, Docs = job.Docs, SdhCounts = job.SdhCounts, Sel = job.Sel, Manual = job.Manual,
+            Opts = job.Opts, Overrides = new(job.Overrides), Sidecars = [.. job.Sidecars], Dropped = [.. job.Dropped],
+        };
+        var fresh = it.Info == null || (it.Kind == "video" && it.Docs.Count == 0
+                                        && (it.Info.Subs.Any(t => t.TextBased) || Media.FindSidecars(it.Path).Count > 0));
+        if (fresh)
+            BatchLoad(it, uid, prog, cancel);
+        if (!it.Manual || it.Sel is not { } s || !it.Docs.ContainsKey(s))
+            it.Sel = Batch.PickTrack(it, cfg.Pref);
+        var track = it.Track();
+        var tidy = TidyOpts(it, job, cfg);
+        if (track == null || it.Sel is not { } sel || !it.Docs.ContainsKey(sel))
+        {
+            TidyOrSkip(it, uid, tidy, "no text subtitles", prog, cfg, cancel);
+            return;
+        }
+        if (!job.Force && !Batch.AutoCleaned(it, track))
+        {
+            TidyOrSkip(it, uid, tidy, "no SDH subtitles (regular subtitles only)", prog, cfg, cancel);
+            return;
+        }
+        var res = Batch.CleanItem(it, cfg.Opts)!;
+        var unresolved = res.Unresolved();
+        if (unresolved.Count > 0)
+        {
+            if (job.Policy == "hold" || (fresh && job.Policy == "hold_new"))
+            {
+                JobHeld(uid, $"{unresolved.Count} lines to check");
+                return;
+            }
+            if (job.Policy == "orig")
+            {
+                foreach (var i in unresolved)
+                    res.Overrides[i] = "orig";
+            }
+        }
+        var n = FinalChanged(res);
+        if (!Enumerable.Range(0, res.Doc.Cues.Count).Any(i => res.Final(i) != null))
+        {
+            TidyOrSkip(it, uid, tidy, res.Doc.Cues.Count == 0 ? "this subtitle track is empty"
+                           : "every line would be removed, so the subtitles were left alone", prog, cfg, cancel);
+            return;
+        }
+        if (n == 0 && !job.Force && track.External.Length == 0 && !Batch.PlainToDefault(it, track))
+        {
+            TidyOrSkip(it, uid, tidy, "already clean", prog, cfg, cancel);
+            return;
+        }
+        var mode = it.Kind == "video" ? cfg.VideoMode : cfg.SubMode;
+        var note = "";
+        if (it.Kind == "subtitle" && mode == "embed" && string.IsNullOrEmpty(it.Info!.Companion))
+            (mode, note) = ("new", " (no matching video, so saved as a subtitle file)");
+        var keep = cfg.Keep && !Batch.PlainPick(it, track);
+        var opts = new SaveOptions
+        {
+            Mode = mode, KeepOriginal = keep, MakeDefault = cfg.Default, TrackName = cfg.Name, Language = track.Language,
+            OverwriteSidecar = cfg.Overwrite, RecycleSourceSub = cfg.Recycle,
+            RecyclePaths = cfg.Recycle && it.Kind == "video" ? Batch.RemovableSidecars(it, cfg.Keep, mode) : [],
+        };
+        if (tidy != null)
+        {
+            opts.DropOtherLanguages = tidy.DropOtherLanguages;
+            opts.KeepLanguage = tidy.KeepLanguage;
+            opts.RenameTo = tidy.RenameTo;
+            opts.RenameSidecars = tidy.RenameSidecars;
+        }
+        var outp = Media.Save(Tools, it.Info!, track, res.Render(), res.Doc.Fmt, opts, prog, cancel, Log);
+        RecordRename(it, outp.Path, cfg);
+        JobDone(uid, outp.Path, outp.Note + note, n, it.Sel);
+    }
+
+    private static SaveOptions? TidyOpts(Item it, Job job, BatchCfg cfg)
+    {
+        if (it.Kind != "video" || cfg.VideoMode != "replace")
+            return null;
+        var nw = job.NewName ?? "";
+        var drop = cfg.DropLangs && Batch.OtherLanguages(it, cfg.KeepLang).Count > 0;
+        if (nw.Length == 0 && !drop)
+            return null;
+        var side = it.Sidecars.Where(t => t.External.Length > 0).Select(t => t.External).ToList();
+        if (side.Count == 0)
+            side = Media.FindSidecars(it.Path);
+        return new SaveOptions
+        {
+            Mode = "replace", DropOtherLanguages = drop, KeepLanguage = cfg.KeepLang, RenameTo = nw, RenameSidecars = side,
+            MakeDefault = cfg.Default, TrackName = cfg.Name,
+        };
+    }
+
+    private void TidyOrSkip(Item it, int uid, SaveOptions? tidy, string why, Action<double, string> prog, BatchCfg cfg,
+                            CancellationToken cancel)
+    {
+        if (tidy == null)
+        {
+            lock (Lock)
+            {
+                _batchCounts["skipped"]++;
+                var x = Item(uid);
+                if (x != null)
+                {
+                    x.State = "skipped";
+                    x.Message = why;
+                    Log($"Skipped {x.Path}: {why}");
+                }
+                Changed(false);
+            }
+            return;
+        }
+        var outp = Media.TidyOrRename(Tools, it.Info!, tidy, prog, cancel, Log);
+        RecordRename(it, outp.Path, cfg);
+        JobDone(uid, outp.Path, outp.Note, 0, it.Sel, "tidy");
+    }
+
+    private static void RecordRename(Item it, string newPath, BatchCfg cfg)
+    {
+        if (PyPath.NormCase(newPath) != PyPath.NormCase(it.Path))
+            RenameHistory.Record(cfg.BatchId, it.Path, newPath);
+    }
+
+    private void BatchLoad(Item it, int uid, Action<double, string> prog, CancellationToken cancel)
+    {
+        Dictionary<int, string>? errors = null;
+        string? tmpdir = null;
+        if (it.Kind == "subtitle")
+        {
+            var (info, doc) = Media.ProbeSubtitleFile(it.Path);
+            it.Info = info;
+            it.Docs = new Dictionary<int, SubtitleDoc> { [0] = doc };
+        }
+        else
+        {
+            prog(-1, "Opening");
+            it.Info = Media.Probe(Tools, it.Path, Log);
+            tmpdir = Directory.CreateTempSubdirectory("subscrub_").FullName;
+            var paths = Media.ExtractSubs(Tools, it.Info, it.Info.Subs, tmpdir, (f, _) => prog(f, "Reading subtitles"), cancel, Log);
+            (it.Docs, errors) = LoadDocs(it.Info, paths);
+            Batch.AttachSidecars(it, Log);
+        }
+        Batch.Measure(it);
+        lock (Lock)
+        {
+            var x = Item(uid);
+            if (x == null)
+                return;
+            x.Info = it.Info;
+            x.Docs = it.Docs;
+            x.Sidecars = it.Sidecars;
+            x.SdhCounts = it.SdhCounts;
+            x.DocErrors = errors ?? [];
+            if (tmpdir != null)
+                x.Tmpdir = tmpdir;
+            if (!x.Manual || x.Sel is not { } s || !x.Docs.ContainsKey(s))
+                x.Sel = Batch.PickTrack(x, Pref);
+            ComputeResult(x);
+        }
+    }
+
+    private void JobDone(int uid, string path, string note, int changed, int? sel, string text = "")
+    {
+        lock (Lock)
+        {
+            _batchCounts["done"]++;
+            var it = Item(uid);
+            if (it == null)
+                return;
+            it.State = "done";
+            it.Output = path;
+            it.Message = note;
+            it.DoneText = DoneText(it, path, note, changed);
+            it.Sel = sel;
+            it.Cleaned = changed;
+            it.Progress = -1;
+            LastOutput = path;
+            if (it.Kind == "video" && PyPath.NormCase(path) != PyPath.NormCase(it.Path) && Cfg.VideoMode == "replace")
+                it.Path = path;
+            Log($"Saved {path}: {changed} lines cleaned. {note}");
+            Changed(false);
+        }
+    }
+
+    private static string DoneText(Item it, string path, string note, int changed)
+    {
+        var bits = new List<string>();
+        if (changed != 0)
+            bits.Add("Cleaned track saved into the video");
+        if (PyPath.NormCase(path) != PyPath.NormCase(it.Path))
+            bits.Add($"renamed from {PyPath.Name(it.Path)}");
+        if (note.Contains("Removed") && note.Contains("other languages"))
+            bits.Add("other languages removed");
+        return Cap(string.Join(", ", bits));
+    }
+
+    private void JobHeld(int uid, string why)
+    {
+        lock (Lock)
+        {
+            _batchCounts["held"]++;
+            var it = Item(uid);
+            if (it != null)
+            {
+                it.State = "ready";
+                it.Message = "";
+                Log($"Held for review {it.Path}: {why}");
+            }
+            Changed(false);
+        }
+    }
+
+    private void JobFailed(int uid, string msg)
+    {
+        lock (Lock)
+        {
+            var it = Item(uid);
+            if (msg == CancelledMark)
+            {
+                if (it != null)
+                {
+                    it.State = it.Info != null ? "ready" : "queued";
+                    it.Message = "";
+                }
+                Changed(false);
+                return;
+            }
+            _batchCounts["failed"]++;
+            if (it != null)
+            {
+                it.State = "failed";
+                it.Message = msg;
+                Log($"Failed {it.Path}: {msg}");
+            }
+            Changed(false);
+        }
+    }
+
+    private void AllDone(bool cancelled)
+    {
+        JsonObject done;
+        lock (Lock)
+        {
+            _saving = false;
+            _saver = null;
+            var c = _batchCounts;
+            var parts = new List<string>();
+            if (c["done"] != 0)
+                parts.Add($"{c["done"]} saved");
+            if (c["held"] != 0)
+                parts.Add($"{c["held"]} waiting for you to check");
+            if (c["skipped"] != 0)
+                parts.Add($"{c["skipped"]} skipped");
+            if (c["failed"] != 0)
+                parts.Add($"{c["failed"]} failed");
+            var summary = parts.Count > 0 ? string.Join(", ", parts) : "nothing saved";
+            JsonObject? tell = null;
+            if (cancelled)
+                StatusMsg = ($"Stopped: {summary}.", c["failed"] != 0 ? "bad" : "");
+            else if (c["failed"] != 0)
+                StatusMsg = ($"Finished with problems: {summary}. Hover a file to see why.", "bad");
+            else
+            {
+                var single = _batchTotal == 1 && c["done"] == 1;
+                var it = single ? Items.FirstOrDefault(i => i.State == "done" && i.Output == LastOutput) : null;
+                StatusMsg = (it != null ? Py.Strip($"Saved “{PyPath.Name(it.Output!)}”. {it.Message}") : $"Done: {summary}.",
+                             c["done"] != 0 ? "good" : "");
+            }
+            if (c["failed"] != 0 && _batchTotal == 1)
+            {
+                var it = Items.FirstOrDefault(i => i.State == "failed");
+                if (it != null)
+                    tell = new JsonObject { ["title"] = "Couldn't save", ["text"] = PyFmt.Head(it.Message, 1200), ["log"] = true };
+            }
+            PumpLoader();
+            PumpNames();
+            Changed(true);
+            done = new JsonObject
+            {
+                ["cancelled"] = cancelled,
+                ["counts"] = new JsonObject(c.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+                ["status"] = StatusMsg.Text, ["tell"] = tell,
+                ["outputs"] = new JsonArray(Items.Where(i => i.State == "done" && !string.IsNullOrEmpty(i.Output))
+                    .Select(i => (JsonNode)i.Output!).ToArray()),
+            };
+        }
+        Emit("save_done", done);
+    }
+
+    public void OpenFolder(string? path = null)
+    {
+        var p = path ?? LastOutput;
+        if (!string.IsNullOrEmpty(p))
+            Media.OpenInExplorer(p);
+    }
+
+    // ================================================================ undoing renames, unfinished copies
+
+    public JsonObject? UndoRenamesQuestion()
+    {
+        var rows = RenameHistory.LastBatch();
+        if (rows.Count == 0)
+            return null;
+        return new JsonObject
+        {
+            ["title"] = "Undo the last renames?",
+            ["text"] = $"Put the original names back on {PyFmt.Plural(rows.Count, "file")} from {rows[0].Time}?",
+            ["detail"] = "Only the names change back. Removed subtitle tracks and originals in the Recycle Bin stay as they are.",
+            ["buttons"] = new JsonArray(Button("cancel", "Cancel"), Button("go", "Undo Renames", "primary")),
+        };
+    }
+
+    public JsonObject UndoRenames()
+    {
+        lock (Lock)
+        {
+            if (Busy())
+                throw new InvalidOperationException("Wait for the save to finish.");
+            var rows = RenameHistory.LastBatch();
+            var done = 0;
+            var problems = new List<string>();
+            foreach (var r in rows)
+            {
+                try
+                {
+                    if (!File.Exists(r.New))
+                        problems.Add($"“{PyPath.Name(r.New)}” isn't there any more");
+                    else if (Path.Exists(r.Old))
+                        problems.Add($"“{PyPath.Name(r.Old)}” already exists");
+                    else
+                    {
+                        var sides = Media.FindSidecars(r.New);
+                        File.Move(r.New, r.Old);
+                        Media.RenameSidecars(r.New, r.Old, sides, Log);
+                        done++;
+                        foreach (var it in Items)
+                        {
+                            if (PyPath.NormCase(it.Path) == PyPath.NormCase(r.New))
+                                it.Path = r.Old;
+                        }
+                    }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    problems.Add($"“{PyPath.Name(r.New)}”: {e.Message}");
+                }
+            }
+            if (rows.Count > 0 && problems.Count == 0)
+                RenameHistory.MarkUndone(rows[0].Batch);
+            Log($"Undid {done} rename(s)");
+            Changed(false);
+            if (problems.Count > 0)
+            {
+                return new JsonObject
+                {
+                    ["title"] = "Some names couldn't be put back", ["text"] = $"{PyFmt.Plural(done, "file")} renamed back. Not changed:",
+                    ["rows"] = Rows(problems.Take(8).Select(p => (p, ""))),
+                };
+            }
+            return new JsonObject { ["title"] = "Renames undone", ["text"] = $"{PyFmt.Plural(done, "file")} renamed back." };
+        }
+    }
+
+    /// <summary>"remove": unfinished copies (with their original) go to the Recycle Bin. "restore": a copy whose
+    /// original is missing gets the original name back.</summary>
+    public JsonObject LeftoversAction(List<string> paths, string action, List<string>? which = null)
+    {
+        var failed = new JsonArray();
+        foreach (var lo in Media.FindLeftovers(paths))
+        {
+            if (which != null && !which.Contains(lo.Path))
+                continue;
+            try
+            {
+                if (action == "remove" && !string.IsNullOrEmpty(lo.Original))
+                {
+                    Media.Recycle(lo.Path, Log);
+                    Log($"Moved the unfinished copy {lo.Path} to the Recycle Bin");
+                }
+                else if (action == "restore" && string.IsNullOrEmpty(lo.Original))
+                {
+                    var nw = Media.RestoreLeftover(lo);
+                    Log($"Renamed {lo.Path} back to {nw}");
+                }
+            }
+            catch (Exception e)
+            {
+                failed.Add(new JsonArray(lo.Name, PyFmt.Head(e.Message, 60)));
+            }
+        }
+        return new JsonObject { ["failed"] = failed };
+    }
 }

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The C# engine's own tests (the scenarios of tests/test_swap.py, test_pipeline.py and test_edge.py), run on real
+       videos with FFmpeg and MKVToolNix. Not shipped.
+         dotnet run (project winui/SubScrub.Engine.Tests), with the repository folder as the argument.
+       Needs the samples from "python -m tests.make_samples" and "python -m tests.make_samples (edge)". -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SubScrub.Engine\SubScrub.Engine.csproj" />
+  </ItemGroup>
+</Project>

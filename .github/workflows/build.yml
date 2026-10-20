@@ -218,6 +218,13 @@ jobs:
           python tools/cleaner_parity.py --library samples/library
           python tools/engine_parity.py --library samples/library
 
+      # the C# engine's own tests (test_swap, test_pipeline and test_edge's scenarios) on real videos
+      - name: C# engine tests
+        run: |
+          python -m tests.make_samples
+          python -m tests.make_samples --edge
+          dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .
+
       - name: Screenshots
         env:
           QT_QPA_PLATFORM: offscreen
@@ -300,6 +307,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "the C# cleaner differs from the Python one" }
           python tools/engine_parity.py --library samples/library
           if ($LASTEXITCODE -ne 0) { throw "the C# engine differs from the Python one" }
+
+      # the C# engine's own tests with Windows' Recycle Bin, Restart Manager and path rules
+      - name: C# engine tests on Windows
+        shell: pwsh
+        run: |
+          python -m tests.make_samples
+          if ($LASTEXITCODE -ne 0) { throw "couldn't make the samples" }
+          python -m tests.make_samples --edge
+          if ($LASTEXITCODE -ne 0) { throw "couldn't make the edge cases" }
+          dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .
+          if ($LASTEXITCODE -ne 0) { throw "the C# engine tests failed" }
 
       # the runner's screen is small; try for 1920x1080 so the on-screen shots aren't cramped
       - name: Screen size

@@ -83,6 +83,9 @@ public sealed class SaveOptions
     public string KeepLanguage { get; set; } = "eng";
     public string RenameTo { get; set; } = "";
     public List<string> RenameSidecars { get; set; } = [];
+
+    /// <summary>dataclasses.replace(opts): the lists are shared, as in Python.</summary>
+    public SaveOptions Copy() => (SaveOptions)MemberwiseClone();
 }
 
 public sealed record SaveResult(string Path, string Note = "");
