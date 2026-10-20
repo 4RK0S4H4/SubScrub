@@ -44,6 +44,97 @@ public static class SubFormats
 {
     static SubFormats() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+    // ================================================================ packing (a saved file's tracks, kept small)
+
+    /// <summary>The whole document (cues, their extra fields, the raw items around them) as compressed bytes.</summary>
+    public static byte[] Pack(SubtitleDoc doc)
+    {
+        using var mem = new MemoryStream();
+        using (var z = new System.IO.Compression.DeflateStream(mem, System.IO.Compression.CompressionLevel.Fastest))
+        using (var w = new BinaryWriter(z))
+        {
+            Put(w, doc.Fmt);
+            Put(w, doc.Newline);
+            w.Write(doc.Cues.Count);
+            foreach (var c in doc.Cues)
+            {
+                Put(w, c.Start);
+                Put(w, c.End);
+                Put(w, c.Text);
+                w.Write(c.Extra.Count);
+                foreach (var (k, v) in c.Extra)
+                {
+                    Put(w, k);
+                    switch (v)
+                    {
+                        case null:
+                            w.Write((byte)0);
+                            break;
+                        case string str:
+                            w.Write((byte)1);
+                            Put(w, str);
+                            break;
+                        case List<string> list:
+                            w.Write((byte)2);
+                            w.Write(list.Count);
+                            foreach (var x in list)
+                                Put(w, x);
+                            break;
+                        default:
+                            throw new NotSupportedException($"cue field {k} is a {v.GetType().Name}");
+                    }
+                }
+            }
+            w.Write(doc.Items.Count);
+            foreach (var (isCue, raw, index) in doc.Items)
+            {
+                w.Write(isCue);
+                Put(w, raw);
+                w.Write(index);
+            }
+        }
+        return mem.ToArray();
+    }
+
+    public static SubtitleDoc Unpack(byte[] data)
+    {
+        using var z = new System.IO.Compression.DeflateStream(new MemoryStream(data), System.IO.Compression.CompressionMode.Decompress);
+        using var r = new BinaryReader(z);
+        var doc = new SubtitleDoc(Take(r)) { Newline = Take(r) };
+        for (int i = 0, n = r.ReadInt32(); i < n; i++)
+        {
+            var c = new Cue { Start = Take(r), End = Take(r), Text = Take(r) };
+            for (int k = 0, m = r.ReadInt32(); k < m; k++)
+            {
+                var key = Take(r);
+                c.Extra[key] = r.ReadByte() switch
+                {
+                    0 => null,
+                    1 => Take(r),
+                    _ => Enumerable.Range(0, r.ReadInt32()).Select(_ => Take(r)).ToList(),
+                };
+            }
+            doc.Cues.Add(c);
+        }
+        for (int i = 0, n = r.ReadInt32(); i < n; i++)
+            doc.Items.Add((r.ReadBoolean(), Take(r), r.ReadInt32()));
+        return doc;
+    }
+
+    // strings as their UTF-16 code units, so even a lone surrogate comes back exactly
+    private static void Put(BinaryWriter w, string s)
+    {
+        w.Write(s.Length);
+        w.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(s.AsSpan()));
+    }
+
+    private static string Take(BinaryReader r)
+    {
+        var n = r.ReadInt32();
+        var bytes = r.ReadBytes(n * 2);
+        return new string(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, char>(bytes));
+    }
+
     // ================================================================ reading
 
     /// <summary>UTF-8 (with or without a BOM), UTF-16 with a BOM, else Windows-1252, else Latin-1.</summary>

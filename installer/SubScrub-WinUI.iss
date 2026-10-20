@@ -50,6 +50,44 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{autoprograms}\SubScrub"; Filename: "{app}\SubScrub.exe"
 Name: "{autodesktop}\SubScrub"; Filename: "{app}\SubScrub.exe"; Tasks: desktopicon
 
+[Registry]
+; Explorer's right-click "Clean subtitles with SubScrub" on videos, subtitle files and folders. Per user (HKCU), so no
+; admin rights; SystemFileAssociations works whatever program opens the file. Explorer starts SubScrub once per
+; selected file and the running window collects them (winui/SubScrub/Program.cs). The uninstaller removes the keys.
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4v\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4v\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4v\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.srt\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.srt\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.srt\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ass\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ass\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ass\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ssa\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ssa\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ssa\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.vtt\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.vtt\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.vtt\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubScrub"; ValueType: string; ValueName: ""; ValueData: "Clean subtitles with SubScrub"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubScrub"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\SubScrub.exe,0"
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubScrub\command"; ValueType: string; ValueName: ""; ValueData: """{app}\SubScrub.exe"" ""%1"""
+
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 

@@ -66,6 +66,9 @@ internal static class Tests
         Media.ExtractFor = (tools, info, tracks, dir) => Media.ExtractSubs(tools, info, tracks, dir);
         Media.CountCues = (path, fmt) => SubFormats.Load(path, fmt).Cues.Count;
         Media.PathLimit = PyPath.IsWin ? 259 : 0;
+        Session.ReleaseSaved = true;
+        Media.DriveOf = WinApi.DriveOf;
+        Media.MaxParallelSaves = 2;
     }
 
     private static void Check(bool ok, string what = "")
@@ -193,6 +196,64 @@ internal static class Tests
         var e = Throws<ToolError>(() => Media.SwapIn(src, work, src, null));
         Check(e.Message.Contains(Path.GetFileName(work)), e.Message);
         Check(File.ReadAllText(work) == "new", "never deleted once the original has moved");
+    }
+
+    // files SubScrub no longer needs (a .srt now inside the video): never deleted, kept when the Recycle Bin can't
+
+    private static void Refuse(string p) => throw new IOException("no Recycle Bin here");
+
+    public static void TestRecycleFailureKeepsTheFile()
+    {
+        var (src, _) = SwapSetup(Refuse);
+        var srt = Path.Combine(Path.GetDirectoryName(src)!, "Show.en.sdh.srt");
+        File.WriteAllText(srt, "x");
+        var logged = new List<string>();
+        var what = Media.Recycle(srt, logged.Add);
+        Check(File.Exists(srt) && what.StartsWith(Media.Kept, StringComparison.Ordinal), what);
+        Check(logged.Any(l => l.Contains(srt)), "the log says exactly where it is");
+    }
+
+    public static void TestNetworkDriveKeepsTheFile()
+    {
+        var (src, _) = SwapSetup(ToBin);
+        Media.IsNetworkPath = _ => true;
+        var srt = Path.Combine(Path.GetDirectoryName(src)!, "Show.en.sdh.srt");
+        File.WriteAllText(srt, "x");
+        Check(Media.Trash(srt) == "network drives have no Recycle Bin" && File.Exists(srt));
+    }
+
+    public static void TestBinReportsErrorButTheFileWent()
+    {
+        var (src, _) = SwapSetup(p =>
+        {
+            ToBin(p);
+            throw new IOException("operation aborted");
+        });
+        var srt = Path.Combine(Path.GetDirectoryName(src)!, "Show.en.sdh.srt");
+        File.WriteAllText(srt, "x");
+        Check(Media.Recycle(srt) == "moved to the Recycle Bin");
+    }
+
+    public static void TestSubtitleReplacedInPlaceGoesToTheBin()
+    {
+        var (src, _) = SwapSetup(ToBin);
+        var d = Path.GetDirectoryName(src)!;
+        var srt = Path.Combine(d, "Show.srt");
+        File.WriteAllText(srt, "old");
+        var note = Media.ReplaceTextFile(srt, srt, "new", null);
+        Check(File.ReadAllText(srt) == "new" && Bin[^1] == "old" && note.Contains("Recycle Bin"), note);
+        Check(!File.Exists(Path.Combine(d, "Show" + Media.TmpMark + ".srt")), "no temporary copy left");
+    }
+
+    public static void TestSubtitleReplaceBinRefusesAndNothingChanges()
+    {
+        var (src, _) = SwapSetup(Refuse);
+        var d = Path.GetDirectoryName(src)!;
+        var srt = Path.Combine(d, "Show.srt");
+        File.WriteAllText(srt, "old");
+        var e = Throws<ToolError>(() => Media.ReplaceTextFile(srt, srt, "new", null));
+        Check(e.Message.Contains("Nothing was changed"), e.Message);
+        Check(File.ReadAllText(srt) == "old" && !File.Exists(Path.Combine(d, "Show" + Media.TmpMark + ".srt")));
     }
 
     public static void TestRealRecycleBin()
@@ -716,5 +777,222 @@ internal static class Tests
         var found = s.NameSearch(s.Items[0].Uid, "Slow Horses");
         Check(found["choices"]!.AsArray().Count == 2, found.ToJsonString());
         s.Close();
+    }
+
+    // ================================================================ memory: a saved file's tracks are packed away
+
+    public static void TestPackedTracksComeBackExactly()
+    {
+        var vtt = Path.Combine(NewDir("pack"), "cues.vtt");
+        File.WriteAllText(vtt, "WEBVTT\n\nNOTE a comment\n\nintro\n00:00:01.000 --> 00:00:02.000 align:start\n[door creaks]\nHi.\n\n"
+                               + "00:00:03.000 --> 00:00:04.000\n- JOHN: Yo \ud83c\udfb5\n- Hey.\n");
+        var files = Directory.EnumerateFiles(Path.Combine(Root, "tests", "fixtures"))
+            .Concat(Directory.Exists(Path.Combine(Root, "samples")) ? Directory.EnumerateFiles(Path.Combine(Root, "samples"), "*", SearchOption.AllDirectories) : [])
+            .Where(f => Path.GetExtension(f) is ".srt" or ".ass" or ".vtt").Append(vtt).ToList();
+        Check(files.Count >= 4, "fixtures found");
+        foreach (var f in files)
+        {
+            var doc = SubFormats.Load(f);
+            if (f == vtt)
+                doc.Cues[0].Text += "\ud800";              // a lone surrogate survives too
+            var back = SubFormats.Unpack(SubFormats.Pack(doc));
+            Check(back.Fmt == doc.Fmt && back.Newline == doc.Newline && back.Cues.Count == doc.Cues.Count
+                  && back.Items.SequenceEqual(doc.Items), f);
+            for (var i = 0; i < doc.Cues.Count; i++)
+            {
+                var (a, b) = (doc.Cues[i], back.Cues[i]);
+                Check(a.Start == b.Start && a.End == b.End && a.Text == b.Text && a.Extra.Count == b.Extra.Count, $"{f} cue {i}");
+            }
+            var texts = doc.Cues.Select(c => (string?)c.Text).ToList();
+            Check(back.Render(texts) == doc.Render(texts), f);
+            var some = doc.Cues.Select((c, i) => i % 3 == 0 ? null : (string?)(c.Text + " x")).ToList();
+            Check(back.Render(some) == doc.Render(some), f + " edited");
+        }
+    }
+
+    /// <summary>Saves the library and returns every view of every file afterwards (folder names made the same).</summary>
+    private static (List<string> Views, Session S) SaveAndLook(string lib, string name, bool release) =>
+        SaveAndLook(lib, name, release, out _);
+
+    private static (List<string> Views, Session S) SaveAndLook(string lib, string name, bool release, out List<string> log)
+    {
+        var dir = NewDir(name);
+        CopyDir(lib, dir);
+        var settings = Path.Combine(Tmp, name + ".json");
+        new FileStore(settings).Set("tmdb_key", "stand-in");
+        Session.ReleaseSaved = release;
+        var s = new Session(new FileStore(settings)) { TmdbFactory = _ => FakeTmdb.Demo() };
+        var done = new ManualResetEventSlim();
+        s.Emit = (n, _) =>
+        {
+            if (n == "save_done")
+                done.Set();
+        };
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        foreach (var it in s.Items.ToList())
+            s.Review(it.Uid, "changes");                 // as if each had been looked at
+        var a = new JsonObject();
+        for (var k = 0; k < 12; k++)
+        {
+            var q = s.Save(null, (JsonObject)a.DeepClone());
+            if (q["ask"] is not JsonObject ask)
+                break;
+            var key = ask["key"]!.GetValue<string>();
+            a[key] = key switch { "decision" => "guess", "names" => "keep", "overwrite" => "yes", "locks" => "skip", _ => "go" };
+        }
+        Check(done.Wait(TimeSpan.FromMinutes(10)), "the save finished");
+        Check(s.WaitIdle(300));
+        lock (s.LogLines)
+            log = s.LogLines.Select(l => System.Text.RegularExpressions.Regex.Replace(l[10..].Replace(dir, "<dir>"), @"subscrub_(mux_|verify_)?\w+|took \d+ seconds?", "<varies>")).Where(l => !l.StartsWith("Saving up to", StringComparison.Ordinal)).ToList();
+        var views = new List<string> { s.FilesView().ToJsonString() };
+        if (release)
+        {
+            var shown = s.ReviewUid;
+            Check(s.Items.Where(i => i.State == "done" && i.Uid != shown).All(i => i.Released), "saved files are released");
+            Check(s.Items.Count(i => i.Released) >= 3, "most files were saved and released");
+        }
+        foreach (var it in s.Items.ToList())
+            foreach (var show in new[] { "check", "changes", "all" })
+                views.Add(s.Review(it.Uid, show).ToJsonString());
+        views.Add(s.FilesView().ToJsonString());
+        Session.ReleaseSaved = true;
+        return (views.Select(v => NoUids(JsonNode.Parse(v.Replace(dir.Replace("\\", "\\\\"), "<dir>")))!.ToJsonString()).ToList(), s);
+    }
+
+    /// <summary>Files are numbered across sessions, so two sessions' views are compared without the numbers.</summary>
+    private static JsonNode? NoUids(JsonNode? n)
+    {
+        if (n is JsonObject o)
+        {
+            foreach (var k in o.Select(kv => kv.Key).ToList())
+            {
+                if (k is "uid" or "review_uid")
+                    o.Remove(k);
+                else
+                    NoUids(o[k]);
+            }
+        }
+        else if (n is JsonArray a)
+            foreach (var x in a)
+                NoUids(x);
+        return n;
+    }
+
+    public static void TestSavedFilesAreReleasedAndLookTheSame()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run \"python -m tests.make_samples --library\" first");
+        var (kept, s1) = SaveAndLook(lib, "keep-all", false);
+        var (freed, s2) = SaveAndLook(lib, "release", true);
+        try
+        {
+            Check(kept.Count == freed.Count, "same number of views");
+            for (var i = 0; i < kept.Count; i++)
+                Check(kept[i] == freed[i], $"view {i} differs:\n{kept[i][..Math.Min(400, kept[i].Length)]}\n{freed[i][..Math.Min(400, freed[i].Length)]}");
+            // looking at a saved file brings its data back; leaving it packs it away again
+            var shown = s2.Items.First(i => i.State == "done");
+            s2.Review(shown.Uid, "changes");
+            Check(!shown.Released, "the file on screen is unpacked");
+            s2.Review(s2.Items.First(i => i.Uid != shown.Uid).Uid, "changes");
+            Check(shown.Released, "and packed again when it leaves the screen");
+        }
+        finally
+        {
+            s1.Close();
+            s2.Close();
+        }
+    }
+
+    // ================================================================ two files saving at once
+
+    private static List<(string, string)> History() => RenameHistory.LastBatch().Select(r => (PyPath.Name(r.Old), PyPath.Name(r.New))).ToList();
+
+    public static void TestTwoAtOnceGivesTheSameResultsInTheSameOrder()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run \"python -m tests.make_samples --library\" first");
+        Media.DriveOf = _ => ("one disk", false);                 // a hard drive: one at a time
+        var (one, s1) = SaveAndLook(lib, "one-by-one", true, out var log1);
+        var history1 = History();
+        Media.DriveOf = _ => ("ssd", true);                       // an SSD: two at once
+        var (two, s2) = SaveAndLook(lib, "two-at-once", true, out var log2);
+        var history2 = History();
+        try
+        {
+            lock (s2.LogLines)
+                Check(s2.LogLines.Count(l => l.Contains("Saving up to 2 files at a time")) == 1, "the second run saved two at a time");
+            lock (s1.LogLines)
+                Check(!s1.LogLines.Any(l => l.Contains("Saving up to")), "the first run saved one at a time");
+            Check(one.Count == two.Count, "same number of views");
+            for (var i = 0; i < one.Count; i++)
+                Check(one[i] == two[i], $"view {i} differs");
+            var (a, b) = (log1.SkipWhile(l => !l.StartsWith("Saving ", StringComparison.Ordinal)).ToList(),
+                          log2.SkipWhile(l => !l.StartsWith("Saving ", StringComparison.Ordinal)).ToList());
+            Check(a.Count > 3 && a.SequenceEqual(b), "the log is the same, in the same order:\n" + string.Join("\n", b.Except(a).Take(5)));
+            Check(history1.SequenceEqual(history2), "the rename history is in the same order");
+        }
+        finally
+        {
+            s1.Close();
+            s2.Close();
+        }
+    }
+
+    public static void TestTwoAtOnceCancelLeavesNothingHalfDone()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run \"python -m tests.make_samples --library\" first");
+        Media.DriveOf = _ => ("ssd", true);
+        var dir = NewDir("cancel-two");
+        CopyDir(lib, dir);
+        var before = Digest(dir);
+        var s = new Session(new FileStore(Path.Combine(Tmp, "cancel-two.json")));
+        var done = new ManualResetEventSlim();
+        s.Emit = (n, _) =>
+        {
+            if (n == "save_done")
+                done.Set();
+        };
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var a = new JsonObject();
+        for (var k = 0; k < 12; k++)
+        {
+            var q = s.Save(null, (JsonObject)a.DeepClone());
+            if (q["ask"] is not JsonObject ask)
+                break;
+            var key = ask["key"]!.GetValue<string>();
+            a[key] = key switch { "decision" => "guess", "names" => "keep", "overwrite" => "yes", "locks" => "skip", _ => "go" };
+        }
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (s.Items.Count(i => i.State == "saving") < 2 && watch.Elapsed.TotalSeconds < 60 && !done.IsSet)
+            Thread.Sleep(5);
+        s.Cancel();
+        Check(done.Wait(TimeSpan.FromMinutes(5)), "the save stopped");
+        try
+        {
+            Check(Leftovers(dir).Count == 0, "no temporary copies left");
+            var after = Digest(dir);
+            foreach (var it in s.Items.Where(i => i.State != "done"))
+            {
+                var rel = Path.GetRelativePath(dir, it.Path);
+                Check(after.TryGetValue(rel, out var h) && h == before[rel], $"{rel} is untouched");
+                Check(it.State is "ready" or "queued" or "skipped", $"{rel}: {it.State}");
+            }
+            Check(s.Items.Any(i => i.State != "done"), "the cancel stopped the batch before the end");
+        }
+        finally
+        {
+            s.Close();
+        }
     }
 }

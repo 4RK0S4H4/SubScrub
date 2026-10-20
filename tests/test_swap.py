@@ -81,6 +81,69 @@ def test_rename_fails_after_original_moved_keeps_new_file():
     assert work.read_text(encoding="utf-8") == "new"           # never deleted once the original has moved
 
 
+# --- files SubScrub no longer needs (a .srt now inside the video): never deleted, kept when the Recycle Bin can't
+def _refuse(p):
+    raise OSError("no Recycle Bin here")
+
+
+def test_recycle_failure_keeps_the_file():
+    d, src, work = _setup(_refuse)
+    srt = d / "Show.en.sdh.srt"
+    srt.write_text("x", encoding="utf-8")
+    logged = []
+    what = media.recycle(srt, logged.append)
+    assert srt.exists() and what.startswith(media.KEPT), what
+    assert any(str(srt) in line for line in logged), logged          # the log says exactly where it is
+
+
+def test_network_drive_keeps_the_file():
+    d, src, work = _setup(_to_bin)
+    media.is_network_path = lambda p: True
+    srt = d / "Show.en.sdh.srt"
+    srt.write_text("x", encoding="utf-8")
+    assert media.trash(srt) == "network drives have no Recycle Bin" and srt.exists()
+
+
+def test_bin_reports_error_but_the_file_went():
+    def flaky(p):
+        _to_bin(p)
+        raise OSError("operation aborted")
+    d, src, work = _setup(flaky)
+    srt = d / "Show.en.sdh.srt"
+    srt.write_text("x", encoding="utf-8")
+    assert media.recycle(srt) == "moved to the Recycle Bin"
+
+
+def test_extras_are_kept_with_a_note():
+    d, src, work = _setup(_refuse)
+    srt = d / "Show.en.sdh.srt"
+    srt.write_text("x", encoding="utf-8")
+    note = media._recycle_extras([str(srt)], None)
+    assert srt.exists() and f"“{srt.name}” {media.KEPT}" in note, note
+
+
+def test_subtitle_replaced_in_place_goes_to_the_bin():
+    d, src, work = _setup(_to_bin)
+    srt = d / "Show.srt"
+    srt.write_text("old", encoding="utf-8")
+    note = media._replace_text_file(srt, srt, "new", None)
+    assert srt.read_text(encoding="utf-8-sig") == "new" and BIN[-1] == "old" and "Recycle Bin" in note
+    assert not (d / f"Show{media.TMP_MARK}.srt").exists()
+
+
+def test_subtitle_replace_bin_refuses_and_nothing_changes():
+    d, src, work = _setup(_refuse)
+    srt = d / "Show.srt"
+    srt.write_text("old", encoding="utf-8")
+    try:
+        media._replace_text_file(srt, srt, "new", None)
+        raise AssertionError("expected an error")
+    except media.ToolError as e:
+        assert "Nothing was changed" in str(e)
+    assert srt.read_text(encoding="utf-8") == "old"
+    assert not (d / f"Show{media.TMP_MARK}.srt").exists()
+
+
 def _info(subs=1, attach=1, chapters=2, kind="mkv", cleaned=True, **kw):
     streams = [{"codec_type": "video"}, {"codec_type": "audio"}] + [{"codec_type": "attachment"}] * attach
     tracks = [media.SubTrack(2 + i, i, "subrip", "eng", "English", False, False, False, {}, cleaned=cleaned and i == 0)

@@ -13,6 +13,8 @@ public sealed partial class Session
         lock (Lock)
         {
             var it = Item(uid) ?? throw new InvalidOperationException("That file isn't in the list any more.");
+            if (ReviewUid is { } was && was != uid && Item(was) is { } left)
+                Release(left);                           // a saved file leaves the screen
             ReviewUid = uid;
             it.Reviewed = true;
             var res = it.Result;

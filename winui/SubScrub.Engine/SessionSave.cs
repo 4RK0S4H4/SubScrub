@@ -296,8 +296,11 @@ public sealed partial class Session
 
     // ================================================================ the save itself
 
-    private int _batchTotal, _batchPos;
+    private int _batchTotal, _batchFinished;
+    private readonly SortedDictionary<int, double> _batchRunning = [];   // job number -> its progress
+    private readonly AsyncLocal<List<object>?> _sink = new();   // a job's log lines and ordered steps while another runs
     private Dictionary<string, int> _batchCounts = [];
+    private int _batchKept;                          // files the Recycle Bin couldn't take, left in their folders
 
     /// <summary>Ask the next question, or start saving when everything is answered (see SaveQuestion).</summary>
     public JsonObject Save(int? only = null, JsonObject? answers = null)
@@ -353,6 +356,9 @@ public sealed partial class Session
         public HashSet<string> Dropped = [];
         public string Policy = "";
         public string? NewName;
+        public HashSet<string> Touched = [];             // files this save reads, replaces, removes or renames to
+        public string Drive = "";
+        public bool Ssd;
     }
 
     private sealed class BatchCfg
@@ -390,6 +396,8 @@ public sealed partial class Session
                     Uid = i.Uid, Path = i.Path, Kind = i.Kind, Info = i.Info, Docs = i.Docs, SdhCounts = i.SdhCounts, Sel = i.Sel,
                     Manual = i.Manual, Opts = i.Opts, Overrides = new(i.Overrides), Force = i.Force || (single && i.Kind == "subtitle"),
                     Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i),
+                    Touched = [.. FilesTouched(i).Append(i.Path).Append(NewName(i) is { Length: > 0 } nn ? PyPath.Join(PyPath.Dir(i.Path), nn) : "")
+                        .Where(x => x.Length > 0).Select(PyPath.Key)],
                 });
             }
             var c = Cfg;
@@ -404,8 +412,10 @@ public sealed partial class Session
             _saving = true;
             _saveCancel = new CancellationTokenSource();
             _batchTotal = jobs.Count;
-            _batchPos = 0;
+            _batchFinished = 0;
+            _batchRunning.Clear();
             _batchCounts = new() { ["done"] = 0, ["skipped"] = 0, ["failed"] = 0, ["held"] = 0 };
+            _batchKept = 0;
             SaveStatus = ("Starting…", 0.0);
             StatusMsg = ("", "");
             var token = _saveCancel.Token;
@@ -429,72 +439,198 @@ public sealed partial class Session
         }
     }
 
-    private void Overall(double frac, string text)
+    /// <summary>Job k's progress. The status line follows the first file still saving; the bar adds up all of them.</summary>
+    private void Overall(int k, double frac, string text)
     {
+        _batchRunning[k] = Math.Max(0.0, Math.Min(1.0, frac));
         var n = Math.Max(1, _batchTotal);
-        var prefix = _batchTotal > 1 ? $"{_batchPos + 1} of {_batchTotal}:  " : "";
-        SaveStatus = (prefix + text, (_batchPos + Math.Max(0.0, Math.Min(1.0, frac))) / n);
+        var first = _batchRunning.Keys.First();
+        if (k == first)
+            SaveStatus = ((_batchTotal > 1 ? $"{k + 1} of {_batchTotal}:  " : "") + text, SaveStatus.Frac);
+        SaveStatus = (SaveStatus.Text, (_batchFinished + _batchRunning.Values.Sum()) / n);
         Changed(false);
+    }
+
+    /// <summary>A step that must happen in list order (the log, the rename history, the last file saved): straight
+    /// away, or when the files before this one are done if two are saving at once.</summary>
+    private void InOrder(Action step)
+    {
+        if (_sink.Value is { } sink)
+        {
+            lock (sink)
+                sink.Add(step);
+        }
+        else
+            step();
+    }
+
+    /// <summary>How many files to save at once: 2 when an SSD or two different disks are involved, else 1.</summary>
+    private static int SaveSlots(List<Job> jobs)
+    {
+        if (jobs.Count < 2 || Media.MaxParallelSaves < 2)
+            return 1;
+        var drives = jobs.Where(j => j.Drive.Length > 0).Select(j => j.Drive).Distinct().Count();
+        return jobs.Any(j => j.Ssd) || drives > 1 ? Media.MaxParallelSaves : 1;
     }
 
     private void RunBatch(List<Job> jobs, BatchCfg cfg, CancellationToken cancel)
     {
         try
         {
-            for (var k = 0; k < jobs.Count; k++)
+            var drives = new Dictionary<string, (string Key, bool Ssd)>();
+            foreach (var job in jobs)
             {
-                if (cancel.IsCancellationRequested)
-                    break;
-                var job = jobs[k];
-                var uid = job.Uid;
-                lock (Lock)
+                var dir = PyPath.Dir(PyPath.Abs(job.Path));
+                if (!drives.TryGetValue(dir, out var d))
+                    drives[dir] = d = Media.DriveOf(dir);
+                (job.Drive, job.Ssd) = d;
+            }
+            var slots = SaveSlots(jobs);
+            if (slots <= 1)
+            {
+                for (var k = 0; k < jobs.Count; k++)
                 {
-                    _batchPos = k;
-                    var it0 = Item(uid);
-                    if (it0 != null)
-                    {
-                        it0.State = "saving";
-                        it0.Message = "Starting…";
-                        it0.Progress = -1;
-                    }
-                    Overall(0.0, it0?.Name ?? "");
-                }
-                var prog = Throttled((f, m) =>
-                {
-                    lock (Lock)
-                    {
-                        var x = Item(uid);
-                        if (x == null)
-                            return;
-                        var pct = f >= 0 ? $" {(int)(f * 100)}%" : "";
-                        x.Message = $"{m}{pct}";
-                        x.Progress = f;
-                        Overall(f >= 0 ? f : 0.0, $"{x.Name}, {m.ToLowerInvariant()}{pct}");
-                    }
-                });
-                try
-                {
-                    SaveOne(job, cfg, cancel, prog);
-                }
-                catch (Cancelled)
-                {
-                    JobFailed(uid, CancelledMark);
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    JobFailed(uid, CancelledMark);
-                    break;
-                }
-                catch (Exception e)
-                {
-                    JobFailed(uid, e.Message.Length > 0 ? e.Message : e.GetType().Name);
+                    if (cancel.IsCancellationRequested || RunJob(k, jobs[k], cfg, cancel))
+                        break;
                 }
             }
+            else
+                RunTogether(jobs, cfg, cancel, slots);
         }
         finally
         {
             AllDone(cancel.IsCancellationRequested);
+        }
+    }
+
+    /// <summary>Saves up to `slots` files at once. A file starts in list order once its disk has room (an SSD takes
+    /// two, any other disk one) and no file it touches is being saved. Each file's log lines, rename record and
+    /// "last saved" are written in list order when the files before it are done, so the log reads as if they had
+    /// been saved one by one.</summary>
+    private void RunTogether(List<Job> jobs, BatchCfg cfg, CancellationToken cancel, int slots)
+    {
+        Log($"Saving up to {slots} files at a time");
+        var gate = new object();
+        var next = 0;
+        var flushed = 0;
+        var stop = false;
+        var running = new List<Job>();
+        var finished = new List<object>?[jobs.Count];
+
+        bool Fits(Job j) =>
+            running.Count < slots && !running.Any(r => r.Touched.Overlaps(j.Touched))
+            && running.Count(r => r.Drive == j.Drive) < (j.Ssd ? 2 : 1);
+
+        void Worker()
+        {
+            while (true)
+            {
+                int k;
+                lock (gate)
+                {
+                    while (true)
+                    {
+                        if (stop || cancel.IsCancellationRequested || next >= jobs.Count)
+                            return;
+                        if (Fits(jobs[next]))
+                            break;
+                        Monitor.Wait(gate, 250);
+                    }
+                    k = next++;
+                    running.Add(jobs[k]);
+                }
+                var sink = new List<object>();
+                _sink.Value = sink;
+                var halt = true;
+                try
+                {
+                    halt = RunJob(k, jobs[k], cfg, cancel);
+                }
+                finally
+                {
+                    _sink.Value = null;
+                    lock (gate)
+                    {
+                        running.Remove(jobs[k]);
+                        stop |= halt;
+                        finished[k] = sink;
+                        for (; flushed < jobs.Count && finished[flushed] is { } done; flushed++)
+                        {
+                            finished[flushed] = null;
+                            foreach (var step in done)
+                            {
+                                if (step is string line)
+                                    WriteLog(line);
+                                else
+                                    ((Action)step)();
+                            }
+                        }
+                        Monitor.PulseAll(gate);
+                    }
+                }
+            }
+        }
+
+        var threads = Enumerable.Range(0, slots).Select(i => new Thread(Worker) { IsBackground = true, Name = $"save {i + 1}" }).ToList();
+        threads.ForEach(t => t.Start());
+        threads.ForEach(t => t.Join());
+    }
+
+    /// <summary>Saves job k. True when the batch should stop (cancelled).</summary>
+    private bool RunJob(int k, Job job, BatchCfg cfg, CancellationToken cancel)
+    {
+        var uid = job.Uid;
+        lock (Lock)
+        {
+            var it0 = Item(uid);
+            if (it0 != null)
+            {
+                it0.State = "saving";
+                it0.Message = "Starting…";
+                it0.Progress = -1;
+            }
+            Overall(k, 0.0, it0?.Name ?? "");
+        }
+        var prog = Throttled((f, m) =>
+        {
+            lock (Lock)
+            {
+                var x = Item(uid);
+                if (x == null || !_batchRunning.ContainsKey(k))
+                    return;
+                var pct = f >= 0 ? $" {(int)(f * 100)}%" : "";
+                x.Message = $"{m}{pct}";
+                x.Progress = f;
+                Overall(k, f >= 0 ? f : 0.0, $"{x.Name}, {m.ToLowerInvariant()}{pct}");
+            }
+        });
+        try
+        {
+            SaveOne(job, cfg, cancel, prog);
+            return false;
+        }
+        catch (Cancelled)
+        {
+            JobFailed(uid, CancelledMark);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            JobFailed(uid, CancelledMark);
+            return true;
+        }
+        catch (Exception e)
+        {
+            JobFailed(uid, e.Message.Length > 0 ? e.Message : e.GetType().Name);
+            return false;
+        }
+        finally
+        {
+            lock (Lock)
+            {
+                _batchRunning.Remove(k);
+                _batchFinished++;
+            }
         }
     }
 
@@ -616,10 +752,13 @@ public sealed partial class Session
         JobDone(uid, outp.Path, outp.Note, 0, it.Sel, "tidy");
     }
 
-    private static void RecordRename(Item it, string newPath, BatchCfg cfg)
+    private void RecordRename(Item it, string newPath, BatchCfg cfg)
     {
         if (PyPath.NormCase(newPath) != PyPath.NormCase(it.Path))
-            RenameHistory.Record(cfg.BatchId, it.Path, newPath);
+        {
+            var old = it.Path;
+            InOrder(() => RenameHistory.Record(cfg.BatchId, old, newPath));
+        }
     }
 
     private void BatchLoad(Item it, int uid, Action<double, string> prog, CancellationToken cancel)
@@ -665,6 +804,7 @@ public sealed partial class Session
         lock (Lock)
         {
             _batchCounts["done"]++;
+            _batchKept += note.Split(Media.Kept).Length - 1;
             var it = Item(uid);
             if (it == null)
                 return;
@@ -675,9 +815,15 @@ public sealed partial class Session
             it.Sel = sel;
             it.Cleaned = changed;
             it.Progress = -1;
-            LastOutput = path;
+            InOrder(() =>
+            {
+                lock (Lock)
+                    LastOutput = path;
+            });
             if (it.Kind == "video" && PyPath.NormCase(path) != PyPath.NormCase(it.Path) && Cfg.VideoMode == "replace")
                 it.Path = path;
+            if (uid != ReviewUid)
+                Release(it);                             // saved and not on screen: its tracks are packed away
             Log($"Saved {path}: {changed} lines cleaned. {note}");
             Changed(false);
         }
@@ -755,16 +901,18 @@ public sealed partial class Session
             if (c["failed"] != 0)
                 parts.Add($"{c["failed"]} failed");
             var summary = parts.Count > 0 ? string.Join(", ", parts) : "nothing saved";
+            var kept = _batchKept != 0
+                ? $" Kept {PyFmt.Plural(_batchKept, "old subtitle file")} the Recycle Bin couldn't take: hover a file to see where." : "";
             JsonObject? tell = null;
             if (cancelled)
-                StatusMsg = ($"Stopped: {summary}.", c["failed"] != 0 ? "bad" : "");
+                StatusMsg = ($"Stopped: {summary}.{kept}", c["failed"] != 0 ? "bad" : "");
             else if (c["failed"] != 0)
-                StatusMsg = ($"Finished with problems: {summary}. Hover a file to see why.", "bad");
+                StatusMsg = ($"Finished with problems: {summary}. Hover a file to see why.{kept}", "bad");
             else
             {
                 var single = _batchTotal == 1 && c["done"] == 1;
                 var it = single ? Items.FirstOrDefault(i => i.State == "done" && i.Output == LastOutput) : null;
-                StatusMsg = (it != null ? Py.Strip($"Saved “{PyPath.Name(it.Output!)}”. {it.Message}") : $"Done: {summary}.",
+                StatusMsg = (it != null ? Py.Strip($"Saved “{PyPath.Name(it.Output!)}”. {it.Message}") : $"Done: {summary}.{kept}",
                              c["done"] != 0 ? "good" : "");
             }
             if (c["failed"] != 0 && _batchTotal == 1)
@@ -786,6 +934,9 @@ public sealed partial class Session
             };
         }
         Emit("save_done", done);
+        // the batch's working memory (tool output, the saved files' tracks before they were packed) goes back to
+        // Windows now rather than whenever the runtime gets round to it
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     public void OpenFolder(string? path = null)
@@ -875,7 +1026,11 @@ public sealed partial class Session
             {
                 if (action == "remove" && !string.IsNullOrEmpty(lo.Original))
                 {
-                    Media.Recycle(lo.Path, Log);
+                    if (Media.Trash(lo.Path, Log) is { } why)
+                    {
+                        failed.Add(new JsonArray(lo.Name, PyFmt.Head($"Kept: {why}", 60)));
+                        continue;
+                    }
                     Log($"Moved the unfinished copy {lo.Path} to the Recycle Bin");
                 }
                 else if (action == "restore" && string.IsNullOrEmpty(lo.Original))

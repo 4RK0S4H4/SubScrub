@@ -269,6 +269,7 @@ internal static partial class Shots
         }
         var result = await done.Task;
         await Task.Delay(1200);
+        Memory("Memory right after saving");
         win.AutoAnswer = null;
         await Save(win, $"{shot++}-saved-{t}");
         var report = new

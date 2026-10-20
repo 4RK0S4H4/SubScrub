@@ -28,6 +28,12 @@ public static partial class Media
 
     public static Func<string, bool> IsNetworkPath { get; set; } = WinApi.IsNetworkPath;
 
+    /// <summary>The physical disk a file is on and whether it's an SSD (("", false) when unknown).</summary>
+    public static Func<string, (string Key, bool Ssd)> DriveOf { get; set; } = WinApi.DriveOf;
+
+    /// <summary>At most this many saves run at once, and only where the drives allow it (see Session.RunBatch).</summary>
+    public static int MaxParallelSaves { get; set; } = 2;
+
     /// <summary>os.replace</summary>
     public static Action<string, string> ReplaceFile { get; set; } = (a, b) => File.Move(a, b, true);
 
@@ -40,25 +46,48 @@ public static partial class Media
 
     public static Func<string, string, int> CountCues { get; set; } = (path, fmt) => SubFormats.Load(path, fmt).Cues.Count;
 
-    /// <summary>Send a file to the Recycle Bin (or delete it where there is none). Returns what happened.</summary>
-    public static string Recycle(string path, Action<string>? log = null)
+    public const string Kept = "kept in its folder";
+
+    /// <summary>Send a file SubScrub no longer needs to the Recycle Bin. It is never deleted: if the Recycle Bin can't
+    /// take it (network drives have none), it stays where it is. Returns null when it went, otherwise why it was kept.</summary>
+    public static string? Trash(string path, Action<string>? log = null)
     {
+        string why;
         if (IsNetworkPath(path))
+            why = "network drives have no Recycle Bin";
+        else
         {
-            File.Delete(path);
-            return "deleted (network drives have no Recycle Bin)";
+            try
+            {
+                SendToTrash(path);
+                return null;
+            }
+            catch (Exception e)
+            {
+                if (!Path.Exists(path))                  // Windows reported a problem but the file did go
+                {
+                    log?.Invoke($"Recycle Bin reported {e.GetType().Name}({e.Message}) for {PyPath.Name(path)}, but the file was moved.");
+                    return null;
+                }
+                why = "the Recycle Bin couldn't take it";
+                log?.Invoke($"Recycle Bin unavailable for {PyPath.Name(path)}: {e.Message}");
+            }
         }
-        try
-        {
-            SendToTrash(path);
-            return "moved to the Recycle Bin";
-        }
-        catch (Exception e)
-        {
-            log?.Invoke($"Recycle Bin unavailable for {PyPath.Name(path)}: {e.Message}");
-            File.Delete(path);
-            return "deleted (Recycle Bin unavailable)";
-        }
+        log?.Invoke($"Kept {path} ({why})");
+        return why;
+    }
+
+    /// <summary>Trash() as words for a save note: "moved to the Recycle Bin" or "kept in its folder (why)".</summary>
+    public static string Recycle(string path, Action<string>? log = null) =>
+        Trash(path, log) is { } why ? $"{Kept} ({why})" : "moved to the Recycle Bin";
+
+    /// <summary>Replace a subtitle file with its cleaned version the safe way videos are replaced (SwapIn): the new
+    /// text is written first, and if the old file can't go to the Recycle Bin nothing is changed.</summary>
+    public static string ReplaceTextFile(string src, string final, string text, Action<string>? log)
+    {
+        var work = PyPath.WithName(src, $"{PyPath.Stem(src)}{TmpMark}{PyPath.Suffix(final)}");
+        WriteText(work, text, true);
+        return SwapIn(src, work, final, log);
     }
 
     private static void WriteText(string path, string text, bool bom) =>
@@ -90,8 +119,9 @@ public static partial class Media
                 final = UniquePath(final);
             var note = "Subtitle file saved next to the video.";
             if (same)
-                note = $"“{PyPath.Name(srcFile!)}” replaced with the cleaned version (old one {Recycle(srcFile!, log)}).";
-            WriteText(final, cleanedText, true);
+                note = $"“{PyPath.Name(srcFile!)}” replaced with the cleaned version. {ReplaceTextFile(srcFile!, final, cleanedText, log)}";
+            else
+                WriteText(final, cleanedText, true);
             log?.Invoke($"Wrote {final}");
             if (!same)
                 note += RecycleExtras(opts.RecyclePaths.Where(p => srcFile != null && p == srcFile).ToList(), log);
@@ -251,12 +281,8 @@ public static partial class Media
             return res;
         }
         var target = OutputPath(info, opts, fmt);
-        if (opts.Mode == "replace")
-        {
-            var what = Recycle(src, log);                // old SDH version goes to the Recycle Bin first
-            WriteText(target, text, true);
-            return new SaveResult(target, $"Old version {what}.");
-        }
+        if (opts.Mode == "replace")                      // the cleaned file takes the old one's place, like a video does
+            return new SaveResult(target, ReplaceTextFile(src, target, text, log));
         WriteText(target, text, true);
         return new SaveResult(target, "Saved next to the original.");
     }
@@ -280,12 +306,37 @@ public static partial class Media
     {
         if (string.IsNullOrEmpty(tools.Ffmpeg))
             throw new ToolError("FFmpeg was not found.");
+        var src = info.Path;
+        // two saves at once on one drive each need their room: what the other one will write counts as used
+        var root = Path.GetPathRoot(Path.GetFullPath(src)) ?? "";
+        var need = (long)(info.Size * 1.02) + 64 * 1024 * 1024;
+        lock (Reserved)
+        {
+            var free = FreeSpace(PyPath.Dir(PyPath.Abs(src))) - Reserved.GetValueOrDefault(root);
+            if (free < info.Size * 1.02 + 64 * 1024 * 1024)
+                throw new ToolError($"Not enough free space on that drive: need about {PyFmt.Fixed(info.Size * 1.02 / 1e9, 1)} GB, "
+                                    + $"have {PyFmt.Fixed(free / 1e9, 1)} GB.");
+            Reserved[root] = Reserved.GetValueOrDefault(root) + need;
+        }
+        try
+        {
+            return RemuxWithRoom(tools, info, track, text, fmt, opts, lang, name, onProgress, cancel, log, drop);
+        }
+        finally
+        {
+            lock (Reserved)
+                Reserved[root] -= need;
+        }
+    }
+
+    private static readonly Dictionary<string, long> Reserved = [];      // drive root -> bytes saves in progress will write
+
+    private static SaveResult RemuxWithRoom(Tools tools, MediaInfo info, SubTrack? track, string? text, string fmt, SaveOptions opts,
+                                            string lang, string name, Action<double, string>? onProgress, CancellationToken cancel,
+                                            Action<string>? log, HashSet<int>? drop)
+    {
         var final = OutputPath(info, opts, fmt);
         var src = info.Path;
-        var free = FreeSpace(PyPath.Dir(PyPath.Abs(src)));
-        if (free < info.Size * 1.02 + 64 * 1024 * 1024)
-            throw new ToolError($"Not enough free space on that drive: need about {PyFmt.Fixed(info.Size * 1.02 / 1e9, 1)} GB, "
-                                + $"have {PyFmt.Fixed(free / 1e9, 1)} GB.");
 
         var work = opts.Mode == "replace" ? PyPath.WithName(final, $"{PyPath.Stem(src)}.subscrub-tmp{PyPath.Suffix(final)}") : final;
         if (PathLimit != 0 && PyFmt.Len(work) > PathLimit)
@@ -347,6 +398,14 @@ public static partial class Media
     ///      can't be renamed it stays next to it under its temporary name.</summary>
     public static string SwapIn(string src, string work, string final, Action<string>? log)
     {
+        lock (SwapLock)                                  // two saves at once never swap at the same moment
+            return SwapInLocked(src, work, final, log);
+    }
+
+    private static readonly object SwapLock = new();
+
+    private static string SwapInLocked(string src, string work, string final, Action<string>? log)
+    {
         ToolError Abort(string msg)
         {
             try
@@ -370,6 +429,9 @@ public static partial class Media
 
         if (WhoHasOpen([src]).GetValueOrDefault(src) is { Count: > 0 })
             throw InUse();
+        if (PyPath.NormCase(final) != PyPath.NormCase(src) && Path.Exists(final))   // taken since the save began
+            throw Abort($"Can't rename to “{PyPath.Name(final)}”: a file with that name is already in the folder. "
+                        + "Nothing was changed.");
         var network = IsNetworkPath(src);
         var note = "Original moved to the Recycle Bin.";
         if (network)
