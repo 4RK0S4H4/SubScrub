@@ -848,7 +848,7 @@ internal static class Tests
         Check(done.Wait(TimeSpan.FromMinutes(10)), "the save finished");
         Check(s.WaitIdle(300));
         lock (s.LogLines)
-            log = s.LogLines.Select(l => System.Text.RegularExpressions.Regex.Replace(l[10..].Replace(dir, "<dir>"), @"subscrub_(mux_|verify_)?\w+|took \d+ seconds?", "<varies>")).Where(l => !l.StartsWith("Saving up to", StringComparison.Ordinal)).ToList();
+            log = s.LogLines.Select(l => System.Text.RegularExpressions.Regex.Replace(l[10..].Replace(dir, "<dir>"), @"subscrub_(mux_|verify_)?[\w.]+|took \d+ seconds?", "<varies>")).Where(l => !l.StartsWith("Saving up to", StringComparison.Ordinal)).ToList();
         var views = new List<string> { s.FilesView().ToJsonString() };
         if (release)
         {
