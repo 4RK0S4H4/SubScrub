@@ -310,7 +310,7 @@ public sealed partial class Session
 
     public void Log(string msg)
     {
-        var line = $"{DateTime.Now:HH:mm:ss}  {msg}";
+        var line = DateTime.Now.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "  " + msg;
         lock (LogLines)
         {
             LogLines.Add(line);

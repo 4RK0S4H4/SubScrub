@@ -690,6 +690,110 @@ def saving_cases(library: Path, tmp: Path) -> tuple[list, list]:
     return jobs, expected
 
 
+# ============================================================================ names (stage 5)
+
+EXTRA_NAMES = [
+    "Batman.v.Superman.Dawn.of.Justice.2016.1080p.BluRay.x264-SPARKS.mkv", "The.Matrix.1999.REMASTERED.2160p.mkv",
+    "Spider-Man - Into the Spider-Verse (2018) [1080p] [YTS.MX].mp4", "Alien³ (1992).mkv", "Amélie.2001.FRENCH.mkv",
+    "Face_Off_1997.avi", "What If...? S01E01.mkv", "Show.Name.S03E10E11.720p.HDTV.mkv", "Show Name 3x07 Title.mkv",
+    "Show.Name.Season.2.Episode.5.mkv", "Show (2005) S01E01-E02 Pilot.mkv", "CON.mkv", "Dune Part Two 2024.mkv",
+    "2001.A.Space.Odyssey.1968.mkv", "1917.2019.mkv", "Blade Runner.mkv", "Severance S2 E4.mkv",
+    "The Expanse - S01E03 - Remember the Cant.mkv", "Slow Horses S04E01.mkv", "Planet Earth III 2023 S01E02.mkv",
+    "[Group] Show - 01 [1080p].mkv", "Movie.Name.2020.DDP5.1.Atmos.DV.HDR10Plus.mkv", "Movie (2020) (1080p x265 10bit).mkv",
+    "Movie.Name.-.Subtitle.2010.mkv", "M.A.S.H.S01E01.mkv", "Mr. & Mrs. Smith (2005).mkv", "Lost S6E17E18.mkv",
+    "Doctor Who (2005) - S00E01 - The Christmas Invasion.mkv", "Movie.mkv", ".mkv", "2024.mkv", "S01E01.mkv",
+]
+
+
+def naming_cases(tmp: Path) -> tuple[dict, dict]:
+    from subscrub import demo_tmdb, naming
+    from tests import test_naming as tn
+
+    def pool(movies, shows, seasons):
+        return {"movies": list(movies.values()), "shows": list(shows.values()),
+                "seasons": [[i, sn, eps] for (i, sn), eps in seasons.items()]}
+    pools = {"test": pool(tn.MOVIES, tn.SHOWS, tn.SEASONS),
+             "demo": pool(demo_tmdb.MOVIES, demo_tmdb.SHOWS, demo_tmdb.SEASONS)}
+    rec = {"parse": [], "safe": [], "render": [], "sim": [], "match": []}
+    real = {k: getattr(naming, k) for k in ("parse", "safe_name", "render", "title_similarity", "match")}
+
+    def w_parse(name):
+        rec["parse"].append(name)
+        return real["parse"](name)
+
+    def w_safe(t):
+        rec["safe"].append(t)
+        return real["safe_name"](t)
+
+    def w_render(c, ext, with_year=False, max_len=180):
+        rec["render"].append([choice_json(c), ext, with_year, max_len])
+        return real["render"](c, ext, with_year, max_len)
+
+    def w_match(api, filename, duration_sec=0.0):
+        rec["match"].append([filename, duration_sec])
+        return real["match"](api, filename, duration_sec)
+    patches = {"parse": w_parse, "safe_name": w_safe, "render": w_render, "match": w_match}
+    for k, f in patches.items():
+        setattr(naming, k, f)
+        if hasattr(tn, k):
+            setattr(tn, k, f)
+    try:
+        import inspect
+        for fname, fn in sorted(vars(tn).items()):
+            if fname.startswith("test_") and inspect.isfunction(fn) and fname != "test_api_key_and_errors":
+                fn()
+    finally:
+        for k, f in real.items():
+            setattr(naming, k, f)
+            if hasattr(tn, k):
+                setattr(tn, k, f)
+    names = list(dict.fromkeys(rec["parse"] + [m[0] for m in rec["match"]] + EXTRA_NAMES
+                               + [p.name for p in sorted((tmp / "library").iterdir())]
+                               + [p.name for p in sorted((tmp / "edge").rglob("*.mkv"))]))
+    titles = list(dict.fromkeys(rec["safe"] + [c["title"] for c in tn.MOVIES.values()] + [
+        "Batman v Superman: Dawn of Justice", "Face/Off", "AC/DC: Live", "What If...?", "Who? Me*", 'He said "no"',
+        "  spaced   out  ", "LPT1", "con.txt", "Ångström · Café", "a\tb|c<d>", "Title:Subtitle", "10:30 to Yuma", "",
+        "...", "Trailing dots...", "x" * 220]))
+    choices = [c[0] for c in rec["render"]] + [
+        {"kind": "movie", "tmdb_id": 1, "title": "x" * 200, "year": 2001, "season": None, "episodes": [],
+         "episode_titles": [], "runtime": None, "score": 0.0, "why": []},
+        {"kind": "episode", "tmdb_id": 2, "title": "Show: The Return " * 12, "year": None, "season": 12,
+         "episodes": [3, 4], "episode_titles": ["A", "B"], "runtime": None, "score": 0.0, "why": []},
+        {"kind": "episode", "tmdb_id": 3, "title": "Show", "year": None, "season": 1, "episodes": [],
+         "episode_titles": [], "runtime": None, "score": 0.0, "why": []}]
+    sims = [[a, b] for a in ("Batman V Super Dawn of Justice", "Dune", "The Expanse", "Slow Horses", "Mr & Mrs Smith",
+                             "Blade Runner 2049", "Severance", "")
+            for b in ("Batman v Superman: Dawn of Justice", "Dune: Part Two", "Expanse", "Slow Horses: Inside",
+                      "Mr. & Mrs. Smith", "Blade Runner", "Severance", "Amélie", "")]
+    durations = [0.0, 117 * 60.0, 137 * 60.0, 152 * 60.0, 155 * 60.0, 167 * 60.0, 3000.0]
+    searches = [["Dune", "movie"], ["dune part", "movie"], ["Slow Horses", "episode"], ["Expanse", "episode"],
+                ["Batman Superman", "movie"], ["", "movie"], ["  Fargo ", "episode"], ["Green Lantern", "episode"]]
+    cases = {"pools": pools, "names": names, "titles": titles, "choices": choices, "sims": sims,
+             "durations": durations, "searches": searches}
+
+    def pj(p):
+        return {"title": p.title, "year": p.year, "season": p.season, "episodes": list(p.episodes),
+                "episode_title": p.episode_title, "is_episode": p.is_episode}
+
+    def api_for(k):
+        return tn.FakeTMDB() if k == "test" else demo_tmdb.FakeTMDB()
+    exp = {"parse": [pj(naming.parse(n)) for n in names], "safe": [naming.safe_name(t) for t in titles],
+           "render": [], "sims": [naming.title_similarity(a, b) for a, b in sims], "match": [], "search": []}
+    for c in choices:
+        ch = naming.Choice(**c)
+        exp["render"].append([naming.render(ch, e, y) for e in (".mkv", "mp4") for y in (False, True)]
+                             + [ch.label(), ch.episode_code()])
+    for k in ("test", "demo"):
+        for n in names:
+            for d in durations:
+                exp["match"].append(match_json(naming.match(api_for(k), n, d)))
+        for n in names[:12]:
+            p = naming.parse(n)
+            for text, kind in searches:
+                exp["search"].append([choice_json(c) for c in naming.search(api_for(k), text, kind, p)])
+    return cases, exp
+
+
 # ============================================================================ comparing
 
 def norm(x):
@@ -733,8 +837,10 @@ def main() -> int:
         fcases, fexpected = file_cases([tmp / "library", tmp / "edge", tmp / "subs"])
         rcases, rexpected = reading_cases(tmp)
         scases, sexpected = saving_cases(library, tmp)
-        cases = {"files": fcases, "sessions": sessions, "reading": rcases, "saving": scases}
-        expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected, "saving": sexpected})
+        ncases, nexpected = naming_cases(tmp)
+        cases = {"files": fcases, "sessions": sessions, "reading": rcases, "saving": scases, "naming": ncases}
+        expected = norm({"files": fexpected, "sessions": expected_sessions, "reading": rexpected, "saving": sexpected,
+                         "naming": nexpected})
         (tmp / "cases.json").write_text(json.dumps(cases, ensure_ascii=False, default=str), encoding="utf-8")
         run = subprocess.run(["dotnet", "run", "--project", str(PARITY), "-c", "Release", "--", "session",
                               str(tmp / "cases.json"), str(tmp / "csharp.json")], capture_output=True, text=True)
@@ -754,7 +860,7 @@ def main() -> int:
         print(f"{len(sessions)} sessions ({n_items} files), {n_ops:,} views and actions, "
               f"{len(fcases['pair']) + len(fcases['subs']) + len(fcases['videos']) + len(fcases['names'])} file cases, "
               f"{len(rcases['adds'])} fresh reads, {len(rcases['probe'])} videos probed and extracted, "
-              f"{len(scases)} saves")
+              f"{len(scases)} saves, {len(nexpected['match']):,} title matches")
         if problems:
             for p in problems[:40]:
                 print("  DIFF", p)

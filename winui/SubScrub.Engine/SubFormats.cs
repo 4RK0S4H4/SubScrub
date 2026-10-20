@@ -346,10 +346,10 @@ public static class SubFormats
         var m = Time.Match(t ?? "");
         if (!m.Success)
             return 0.0;
-        var h = m.Groups[1].Success ? long.Parse(m.Groups[1].Value) : 0;
-        var mi = long.Parse(m.Groups[2].Value);
-        var s = long.Parse(m.Groups[3].Value);
+        var h = m.Groups[1].Success ? long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 0;
+        var mi = long.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var s = long.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
         var frac = m.Groups[4].Success ? m.Groups[4].Value : "0";
-        return h * 3600 + mi * 60 + s + double.Parse(frac) / Math.Pow(10, frac.Length);
+        return h * 3600 + mi * 60 + s + double.Parse(frac, System.Globalization.CultureInfo.InvariantCulture) / Math.Pow(10, frac.Length);
     }
 }

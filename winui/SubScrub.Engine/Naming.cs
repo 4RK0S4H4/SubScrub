@@ -185,7 +185,7 @@ public static class RenameHistory
     {
         try
         {
-            File.AppendAllText(HistoryPath(), Dumps([("batch", batchId), ("time", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")),
+            File.AppendAllText(HistoryPath(), Dumps([("batch", batchId), ("time", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)),
                                                      ("old", oldPath), ("new", newPath)]) + "\n", new System.Text.UTF8Encoding(false));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -248,3 +248,15 @@ public static class RenameHistory
         }
     }
 }
+
+/// <summary>What the engine asks TMDB (the real client, or a stand-in in tests and the scripted QA run).</summary>
+public interface ITmdb
+{
+    List<System.Text.Json.Nodes.JsonObject> SearchMovie(string query, int? year = null);
+    System.Text.Json.Nodes.JsonObject Movie(int tmdbId);
+    List<System.Text.Json.Nodes.JsonObject> SearchTv(string query, int? year = null);
+    System.Text.Json.Nodes.JsonObject Season(int tmdbId, int season);
+}
+
+/// <summary>TMDB couldn't be reached or refused the key.</summary>
+public sealed class TmdbError(string message) : Exception(message);

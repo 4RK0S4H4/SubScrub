@@ -43,8 +43,12 @@ window keeps using the Python helper for anything not ported yet.
   each input and compares the files, tracks, flags and text. `SubScrub.Engine.Tests` ports test_swap, test_pipeline
   and test_edge: `python -m tests.make_samples`, `python -m tests.make_samples --edge`, then
   `dotnet run --project winui/SubScrub.Engine.Tests -c Release -- .` (CI runs it on Linux and on Windows).
-- Next: TMDB names and the settings in the registry, then the switch to the C# engine. When that is done, the `core`
-  folder goes.
+- Stage 5 (done): TMDB names (`NamingMatch.cs`: reading release names, scoring, matching and searching; `Tmdb.cs`:
+  the client with a v3 key or v4 token, retries and a cache, and the stand-in used by the scripted QA run) and the
+  session's title lookups (`SessionNames.cs`), plus the settings in the Qt app's registry key with QSettings'
+  escaping (`RegistryStore`). The parity check compares every call `tests/test_naming.py` makes, a corpus of release
+  names and 938 title matches against both stand-ins.
+- Next: the switch to the C# engine. When that is done, the `core` folder goes.
 
 ## Build (Windows)
 
