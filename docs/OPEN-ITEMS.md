@@ -19,6 +19,14 @@ is as before: clean it and drop the original SDH track per the save default. A t
 wins. The "to check" grading runs without the SDH cross-check in the regular-track case. Code: `batch.pick_track`,
 `batch.plain_pick`, `media.save`. "Keep the SDH Track Too" only matters when an SDH track is the one cleaned.
 
+Decided by the user (2026-10-20), in their words: "I don't mind going forward Claude releasing for me for big updates
+like this. If there is a major bug we just do .1 updates, and X.X.1 updates of smaller changes." Read as: Claude
+publishes releases without asking; big updates get a new major version (4.0), a major-bug fix the next minor (4.1),
+smaller changes a patch (4.0.1). The user still says "log it" vs "go" for what gets built.
+
+Decided 2026-10-20 (default in the WinUI plan, not objected to): the 4.0 installer installs over 3.x (same AppId,
+install folder and Start-menu name; settings untouched), so 3.x's in-app update moves people to 4.0.
+
 ## Install and update (built in batch 3, not yet released)
 
 - **Installer** `installer/SubScrub.iss` (Inno Setup, built in CI as `dist/SubScrub-Setup.exe` and attached to the
