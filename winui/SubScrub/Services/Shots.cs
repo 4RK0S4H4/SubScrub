@@ -229,12 +229,23 @@ internal static partial class Shots
             win.Dialog.Hide();
             await Task.Delay(600);
         }
+
+        // Tools: each program's version, Clear Cache
+        win.AutoAnswer = async dialog =>
+        {
+            await Task.Delay(900);
+            await Save(win, $"12-tools-{t}");
+            dialog.Choose("ok");
+        };
+        await win.ShowToolsAsync();
+        win.AutoAnswer = null;
+        await Task.Delay(500);
     }
 
     private static async Task RunSave(MainWindow win, string t)
     {
         var asked = new List<string>();
-        var shot = 12;
+        var shot = 13;
         win.AutoAnswer = async dialog =>
         {
             asked.Add(dialog.Key);
