@@ -76,13 +76,29 @@ internal static partial class Shots
 
     private static void Note(string line) => Timings.Add(line);
 
+    /// <summary>The working set (what Task Manager shows) and the private bytes, after a garbage collection.</summary>
+    private static void Memory(string label)
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        using var p = Process.GetCurrentProcess();
+        p.Refresh();
+        Note($"{label}: {p.WorkingSet64 / 1048576.0:F0} MB working set, {p.PrivateMemorySize64 / 1048576.0:F0} MB private, "
+             + $"{GC.GetTotalMemory(false) / 1048576.0:F0} MB managed");
+    }
+
     public static async Task RunAsync(MainWindow win)
     {
         var t = (Theme ?? (win.IsDark ? "dark" : "light")) + Tag;
         try
         {
             Directory.CreateDirectory(Dir!);
+            var started = Process.GetCurrentProcess().StartTime;
             await win.Core!.WhenReady;
+            Note($"Start to the engine ready: {(DateTime.Now - started).TotalSeconds:F2} s");
+            if (win.FirstFrame is { } first)
+                Note($"Start to the first frame: {(first - started).TotalSeconds:F2} s");
+            Memory("Memory at start");
             await Task.Delay(2400);                                  // fonts, Mica, first layout and the welcome demo
             await Save(win, $"01-welcome-{t}");
             if (Library != null)
@@ -97,6 +113,7 @@ internal static partial class Shots
         }
         finally
         {
+            Memory("Memory at the end");
             File.WriteAllLines(Path.Combine(Dir!, $"timings-{t}.txt"), Timings);
             if (Problems.Count > 0)
                 File.WriteAllLines(Path.Combine(Dir!, $"problems-{t}.txt"), Problems);
@@ -129,6 +146,7 @@ internal static partial class Shots
         if (!await WaitFor(() => Settled(win), 300))
             Problems.Add("the library didn't finish reading within 5 minutes");
         Note($"Add the sample library and read it all: {watch.Elapsed.TotalSeconds:F1} s ({win.Files.Count} files)");
+        Memory("Memory with the library read");
         await Task.Delay(900);
         await Save(win, $"02-files-{t}");
 

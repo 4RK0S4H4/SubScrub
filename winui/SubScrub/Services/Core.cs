@@ -27,6 +27,7 @@ public sealed class Core : IDisposable
     public event Action<FilesView>? Files;
     public event Action<int>? ReviewChanged;
     public event Action<SaveDone>? SaveDone;
+    public event Action<double>? UpdateProgress;
 #pragma warning disable CS0067 // kept for the window: an in-process engine doesn't stop on its own
     public event Action<string>? Died;
 #pragma warning restore CS0067
@@ -129,6 +130,10 @@ public sealed class Core : IDisposable
                 case "review_changed":
                     var uid = data?["uid"]?.GetValue<int>() ?? 0;
                     _ui.TryEnqueue(() => ReviewChanged?.Invoke(uid));
+                    break;
+                case "update_progress":
+                    var f = data?["fraction"]?.GetValue<double>() ?? 0;
+                    _ui.TryEnqueue(() => UpdateProgress?.Invoke(f));
                     break;
                 case "save_done":
                     var done = data.Deserialize<SaveDone>(Json)!;
