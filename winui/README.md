@@ -20,13 +20,21 @@ of settings and one TMDB key.
 `winui/SubScrub.Engine` (plain .NET 8, no Windows dependency, so it builds and is checked on Linux too) and must give
 *identical* results: `python tools/cleaner_parity.py --library samples/library` runs both on every cleaner call the
 test suites make, the fixtures and every sample track under each option, and fails on any difference in text,
-rules, risk, reasons, notes, counts or the saved file (CI runs it in the `screenshots` job). The window keeps using
-the Python helper for anything not ported yet.
+rules, risk, reasons, notes, counts or the saved file. `python tools/engine_parity.py --library samples/library`
+does the same for the rest of the engine: real Python sessions read the sample library, the edge cases, subtitle files
+on their own and a library after a real save, then a script of actions (every view, track changes, kept lines,
+per-file edits, settings, every save question with several sets of answers and programs holding files open) runs on
+both engines from the same state. CI runs both checks on Linux (`screenshots` job) and on Windows (`winui` job). The
+window keeps using the Python helper for anything not ported yet.
 
 - Stage 1 (done): the cleaner (`Cleaner.cs`) and the subtitle formats (`SubFormats.cs`), with `Py.cs` for the
   few Python string rules the results depend on. Change `subscrub/cleaner.py` first, then the port, then run the check.
-- Next: track picking and the file list's verdicts (`batch.py`, `core.py`), then probing and muxing, TMDB, the
-  safe swap and the files-in-use check. When the last one is done, the `core` folder goes.
+- Stage 2 (done): the file list's logic (`Batch.cs`: track picking, sidecars, pairing dropped files, names) and the
+  views of `core.py` (`Session.cs`, `SessionReview.cs`, `SessionSave.cs`: verdicts, rows, the summary, Review, the
+  questions at save time), returning the same JSON the helper sends. `Media.cs` has the track model and file
+  matching, `Naming.cs` the name rendering, `PyLib.cs` Python's formatting, sorting, path rules and difflib.
+- Next: probing and extracting, then muxing and the safe swap, TMDB and the files-in-use check. When the last one is
+  done, the `core` folder goes.
 
 ## Build (Windows)
 
