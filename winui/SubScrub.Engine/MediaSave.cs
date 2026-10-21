@@ -358,6 +358,39 @@ public static partial class Media
 
         if (Path.Exists(work))
             File.Delete(work);
+        // only flags and the name change: edit a copy with mkvpropedit instead of remuxing; checked and swapped in as
+        // a remux would be, and a remux if anything about it fails
+        if (opts.TextUnchanged && opts.Mode == "replace" && info.Kind == "mkv" && track != null && !opts.KeepOriginal
+            && !string.IsNullOrEmpty(tools.Mkvpropedit) && !string.IsNullOrEmpty(tools.Mkvmerge) && text != null
+            && dropped.SetEquals([track.Index]))
+        {
+            var edited = false;
+            try
+            {
+                EditCopy(tools, info, track, work, tmpdir, lang, name, opts, onProgress, cancel, log);
+                onProgress?.Invoke(-1, "Checking the new file");
+                Verify(tools, info, work, info.Subs.Count, log, text, fmt, (lang, name));
+                edited = true;
+            }
+            catch (Exception e) when (e is not (Cancelled or OperationCanceledException))
+            {
+                log?.Invoke($"Editing the flags in place didn't work out ({e.Message}); rewriting the file instead.");
+                try
+                {
+                    if (Path.Exists(work))
+                        File.Delete(work);
+                }
+                catch (Exception d) when (d is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+            if (edited)
+            {
+                // the verified copy goes in exactly as a remux's would (SwapIn's own rules, outside the fallback)
+                Session.TryDeleteDir(tmpdir);
+                return new SaveResult(final, SwapIn(src, work, final, log));
+            }
+        }
         var useMkvmerge = info.Kind == "mkv" && !string.IsNullOrEmpty(tools.Mkvmerge);
         try
         {
@@ -493,11 +526,17 @@ public static partial class Media
         return note;
     }
 
-    private const string TagsXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                                   + "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>\n"
-                                   + "<Simple><Name>SUBSCRUB</Name><String>cleaned</String></Simple></Tag></Tags>\n";
+    /// <summary>The version that writes SUBSCRUB_CLEANED on a cleaned MKV track (set when the engine starts).</summary>
+    public static string AppVersion { get; set; } = "4";
 
-    private static readonly Regex GuiProgress = new(@"\A#GUI#progress (\d+)%");
+    /// <summary>The cleaned track's tags: SUBSCRUB=cleaned (finds it again) and SUBSCRUB_CLEANED=&lt;version&gt;, the mark
+    /// that shows the file as Done the next time it's added (decided by the user 2026-10-20).</summary>
+    private static string TagsXml => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                     + "<Tags><Tag><Targets><TargetTypeValue>50</TargetTypeValue></Targets>\n"
+                                     + "<Simple><Name>SUBSCRUB</Name><String>cleaned</String></Simple>\n"
+                                     + $"<Simple><Name>SUBSCRUB_CLEANED</Name><String>{System.Security.SecurityElement.Escape(AppVersion)}</String></Simple></Tag></Tags>\n";
+
+    internal static readonly Regex GuiProgress = new(@"\A#GUI#progress (\d+)%");
 
     private static void MuxMkvmerge(Tools tools, MediaInfo info, SubTrack? track, HashSet<int> drop, string? subPath, string outPath,
                                     string lang, string name, SaveOptions opts, Action<double, string>? onProgress,
@@ -570,6 +609,49 @@ public static partial class Media
         }, log, cancel, [0, 1]);                         // 1 = finished with warnings
     }
 
+    /// <summary>Copies the video to `work` and gives the copy what a remux would: the track's language, name and flags
+    /// (default as asked, not hearing impaired, not forced), SubScrub's tag, and the other subtitle tracks no longer
+    /// default. The original is never edited.</summary>
+    private static void EditCopy(Tools tools, MediaInfo info, SubTrack track, string work, string tmpdir, string lang, string name, SaveOptions opts,
+                                 Action<double, string>? onProgress, CancellationToken cancel, Action<string>? log)
+    {
+        var identText = RunCapture([tools.Mkvmerge!, "-J", info.Path], log, 120);
+        var ident = JsonNode.Parse(identText.Length > 0 ? identText : "{}") as JsonObject ?? [];
+        var mtracks = (ident["tracks"] as JsonArray ?? []).Select(t => t!.AsObject()).ToList();
+        var subIds = mtracks.Where(t => JStr(t["type"]) == "subtitles").Select(t => t["id"]!.GetValue<int>()).ToList();
+        if (subIds.Count != info.Subs.Count)
+            throw new ToolError("MKVToolNix and FFprobe disagree about the subtitle tracks in this file.");
+        var toId = info.Subs.Select((t, k) => (t.Index, k)).ToDictionary(x => x.Index, x => subIds[x.k]);
+        onProgress?.Invoke(-1, "Copying");
+        log?.Invoke($"Copying {PyPath.Name(info.Path)} to change its track flags");
+        File.Copy(info.Path, work, true);
+        cancel.ThrowIfCancellationRequested();
+        var tags = PyPath.Join(tmpdir, "edit-tags.xml");
+        WriteText(tags, TagsXml, false);
+        try
+        {
+            var id = toId[track.Index] + 1;                       // mkvpropedit counts tracks from 1
+            var cmd = new List<string>
+            {
+                tools.Mkvpropedit!, work, "--edit", $"track:{id}", "--set", $"name={name}",
+                "--set", $"flag-default={(opts.MakeDefault ? 1 : 0)}", "--set", "flag-hearing-impaired=0", "--set", "flag-forced=0",
+            };
+            if (Media.LangShort(lang) != Media.LangShort(track.Language))
+                cmd.AddRange(["--set", $"language={lang}"]);
+            if (opts.MakeDefault)
+            {
+                foreach (var t in info.Subs.Where(t => t.Index != track.Index && t.Default))
+                    cmd.AddRange(["--edit", $"track:{toId[t.Index] + 1}", "--set", "flag-default=0"]);
+            }
+            cmd.AddRange(["--tags", $"track:{id}:{tags}"]);
+            RunStream(cmd, _ => { }, log, cancel, [0, 1]);       // 1 = finished with warnings
+        }
+        finally
+        {
+            File.Delete(tags);
+        }
+    }
+
     private static int StreamIndex(JsonObject s) => s["index"] is JsonValue v && v.TryGetValue<int>(out var i) ? i : 0;
 
     private static void MuxFfmpeg(Tools tools, MediaInfo info, SubTrack? track, HashSet<int> drop, string? subPath, string outPath,
@@ -583,7 +665,13 @@ public static partial class Media
             "-i", info.Path,
         };
         if (subPath != null)
+        {
+            // the cleaned text has the stored times; FFmpeg moves the video by the container's start time when that is
+            // negative, so move the new track with it
+            if (info.StartTime < 0)
+                cmd.AddRange(["-itsoffset", (-info.StartTime).ToString("0.######", CultureInfo.InvariantCulture)]);
             cmd.AddRange(["-i", subPath]);
+        }
         var mapped = info.Streams.Where(s => !(JStr(s["codec_type"]) is "data" or "attachment" && outKind != "mkv")).ToList();
         var subsIdx = mapped.Where(s => JStr(s["codec_type"]) == "subtitle" && !drop.Contains(StreamIndex(s))).Select(StreamIndex).ToList();
         var mainIdx = mapped.Where(s => JStr(s["codec_type"]) is "video" or "audio").Select(StreamIndex).ToList();
@@ -629,7 +717,7 @@ public static partial class Media
             {
                 cmd.AddRange([$"-disposition:s:{j}", opts.MakeDefault ? "default" : "0",
                               $"-metadata:s:s:{j}", $"language={lang}", $"-metadata:s:s:{j}", $"title={name}",
-                              $"-metadata:s:s:{j}", "SUBSCRUB=cleaned"]);
+                              $"-metadata:s:s:{j}", "SUBSCRUB=cleaned", $"-metadata:s:s:{j}", $"SUBSCRUB_CLEANED={AppVersion}"]);
                 if (outKind == "mp4")
                     cmd.AddRange([$"-metadata:s:s:{j}", $"handler_name={name}"]);
             }

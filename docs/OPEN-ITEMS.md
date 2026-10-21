@@ -48,6 +48,29 @@ a time. Two saves never touch the same file or rename target at once, and the lo
 results read in list order as if the files had been saved one by one. Starting SubScrub again (or Explorer's
 right-click entry on several files) adds the files to the window already open instead of opening a second window.
 
+Decided 2026-10-20 (issue #49): when a save only changes an MKV's track flags and name (the cleaned text is the
+track's own, line for line: a regular track made the default and named "English"), SubScrub uses mkvpropedit instead
+of a full remux, but never on the original: it copies the video to `Name.subscrub-tmp.mkv`, edits the copy, checks it
+like any new file (tracks, fonts, chapters, lines) and swaps it in the usual way (the original to the Recycle Bin).
+If mkvpropedit is missing, fails or the check fails, it remuxes as before. Editing the original in place would be
+faster still, but a failure halfway (power cut, a crash) could leave the only copy damaged, so that isn't done.
+
+Decided by the user 2026-10-20 (issue #51, it writes to their files): every cleaned MKV track SubScrub saves carries
+two Matroska track tags (TargetTypeValue 50): `SUBSCRUB=cleaned` (as before; it finds the track again) and
+`SUBSCRUB_CLEANED=<version>` (new, e.g. `4.0.0`). Nothing else is written, and the video and audio are untouched. A
+video added again whose track still carries `SUBSCRUB_CLEANED` shows as Done ("Already cleaned by SubScrub 4.0.0")
+without being read or cleaned; opening it in Review reads it normally so it can be cleaned again by hand, and a save
+skips it. Any tool that rewrites the file without keeping track tags removes the mark, and the file is then read as
+usual. MP4 gets no mark: FFmpeg can only store a custom tag in MP4 by switching all of the file's metadata to another
+format (`use_metadata_tags`), which can change how other apps read its title. Standalone subtitle files get none.
+Files cleaned by 3.x carry only `SUBSCRUB=cleaned` and are read as before.
+
+Decided 2026-10-20 (issues #46-#50): MKV subtitles are read with mkvextract (FFmpeg as the fallback), up to two files
+are read at once with the save's drive rule, files already read are remembered in `%LOCALAPPDATA%\SubScrub\cache`
+(200 MB, Tools → Clear Cache), and TMDB answers are kept in `%LOCALAPPDATA%\SubScrub\tmdb-cache.json` (searches 7
+days, details 30; never the API key). Found while doing the first: the cleaned track used to be saved late by the
+video's start offset (128 ms on the samples) when a video starts below zero; both readers now give the stored times.
+
 ## Install and update (built in batch 3, not yet released)
 
 - **Installer** `installer/SubScrub.iss` (Inno Setup, built in CI as `dist/SubScrub-Setup.exe` and attached to the

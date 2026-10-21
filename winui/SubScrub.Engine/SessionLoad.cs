@@ -4,9 +4,10 @@ namespace SubScrub.Engine;
 
 public sealed partial class Session
 {
-    private Thread? _loader;
+    // files being read: up to two at once where the drives allow it (the rule the save uses, RunTogether)
+    private readonly Dictionary<int, (Thread Thread, CancellationTokenSource Cancel, string Drive)> _loads = [];
+    private readonly Dictionary<string, (string Key, bool Ssd)> _drives = [];
     private CancellationTokenSource _loadCancel = new();
-    private int? _loadingUid;
     private readonly AutoResetEvent _dirty = new(false);
     private volatile bool _reviewDirty;
     private volatile bool _closed;
@@ -16,6 +17,7 @@ public sealed partial class Session
     public void Start(string version)
     {
         Tools = Media.FindTools(Cfg.Tools);
+        Media.AppVersion = version;
         Changed = review =>
         {
             if (review)
@@ -64,7 +66,10 @@ public sealed partial class Session
     {
         _saveCancel.Cancel();
         _loadCancel.Cancel();
-        foreach (var t in new[] { _saver, _loader })
+        List<Thread> loads;
+        lock (Lock)
+            loads = _loads.Values.Select(l => l.Thread).ToList();
+        foreach (var t in loads.Prepend(_saver))
             t?.Join(TimeSpan.FromSeconds(60));
         lock (Lock)
         {
@@ -200,8 +205,8 @@ public sealed partial class Session
 
     private void RemoveItem(Item it)
     {
-        if (_loadingUid == it.Uid)
-            _loadCancel.Cancel();
+        if (_loads.TryGetValue(it.Uid, out var load))
+            load.Cancel.Cancel();
         if (it.Tmpdir != null)
             TryDeleteDir(it.Tmpdir);
         Items.Remove(it);
@@ -271,14 +276,28 @@ public sealed partial class Session
 
     private void PumpLoaderNow()
     {
-        if (Busy() || (_loader != null && _loader.IsAlive))
-            return;
+        while (!Busy() && StartNextLoad())
+        {
+        }
+    }
+
+    private (string Key, bool Ssd) DriveFor(string path)
+    {
+        var dir = PyPath.Dir(PyPath.Abs(path));
+        if (!_drives.TryGetValue(dir, out var d))
+            _drives[dir] = d = Media.DriveOf(dir);
+        return d;
+    }
+
+    /// <summary>Starts reading the next file in the list if a reader is free for its drive. False when nothing started.</summary>
+    private bool StartNextLoad()
+    {
         Item? it;
         while (true)
         {
             it = Items.FirstOrDefault(i => i.State == "queued");
             if (it == null)
-                return;
+                return false;
             if (it.Kind != "subtitle")
                 break;
             try
@@ -295,14 +314,21 @@ public sealed partial class Session
             }
         }
         if (!Tools.Ready)
-            return;
+            return false;
+        // files start in list order; a second one only on an SSD or another disk, as with saving
+        var (drive, ssd) = DriveFor(it.Path);
+        if (_loads.Count >= (_loads.Count == 0 ? 1 : Media.MaxParallelSaves)
+            || _loads.Values.Count(l => l.Drive == drive) >= (ssd ? 2 : 1) || (_loads.Count > 0 && drive.Length == 0))
+            return false;
         it.State = "probing";
-        _loadCancel = new CancellationTokenSource();
-        _loadingUid = it.Uid;
+        if (_loadCancel.IsCancellationRequested)
+            _loadCancel = new CancellationTokenSource();
+        var mine = CancellationTokenSource.CreateLinkedTokenSource(_loadCancel.Token);
         var item = it;
-        var cancel = _loadCancel.Token;
-        _loader = new Thread(() => LoadOne(item, cancel)) { IsBackground = true, Name = "load" };
-        _loader.Start();
+        var thread = new Thread(() => LoadOne(item, mine.Token)) { IsBackground = true, Name = "load" };
+        _loads[it.Uid] = (thread, mine, drive);
+        thread.Start();
+        return true;
     }
 
     /// <summary>throttled(): passes progress on at most every `interval` seconds (always the first, the last and a
@@ -330,7 +356,29 @@ public sealed partial class Session
         string? tmp = null;
         try
         {
-            var info = Media.Probe(tools, path, Log);
+            var reader = ReadCache.Reader(tools);
+            var cached = ReadCache.Get(path, reader);
+            var probe = cached?.Probe ?? Media.ProbeText(tools, path, Log);
+            var info = Media.ParseProbe(path, probe);
+            if (!it.ReadAnyway && info.Subs.FirstOrDefault(t => t.CleanedBy.Length > 0) is { } mark)
+            {
+                // cleaned by SubScrub before (and unchanged since, or the tag would be gone): Done, nothing to read
+                lock (Lock)
+                {
+                    if (Item(uid) == null || cancel.IsCancellationRequested)
+                        return;
+                    it.Info = info;
+                    it.Marked = mark.CleanedBy;
+                    it.State = "done";
+                    it.Output = path;
+                    it.DoneText = $"Already cleaned by SubScrub {mark.CleanedBy}";
+                    it.Progress = -1;
+                    Log($"{it.Name}: already cleaned by SubScrub {mark.CleanedBy} (track {mark.Index})");
+                    Changed(uid == ReviewUid);
+                    PumpNames();
+                }
+                return;
+            }
             var paths = new Dictionary<int, string>();
             var docs = new Dictionary<int, SubtitleDoc>();
             var errors = new Dictionary<int, string>();
@@ -354,9 +402,13 @@ public sealed partial class Session
                         Changed(false);
                     }
                 }, 0.15);
-                paths = Media.ExtractSubs(tools, info, info.Subs, tmp, prog, cancel, Log);
+                paths = cached != null ? Restore(cached, info, tmp) : Media.ExtractSubs(tools, info, info.Subs, tmp, prog, cancel, Log);
                 (docs, errors) = LoadDocs(info, paths);
             }
+            if (cached == null)
+                ReadCache.Put(path, reader, probe, paths);
+            else
+                Log($"{it.Name}: read from the cache");
             lock (Lock)
             {
                 if (Item(uid) == null || cancel.IsCancellationRequested)
@@ -397,14 +449,24 @@ public sealed partial class Session
         {
             lock (Lock)
             {
-                if (_loadingUid == uid)
-                    _loadingUid = null;
-                _loader = null;
+                _loads.Remove(uid);
                 PumpLoader();
                 if (!Items.Any(i => i.State is "queued" or "probing" or "reading"))
                     CheckLocksAsync();
             }
         }
+    }
+
+    /// <summary>A cached file's tracks, written back as extraction would have left them.</summary>
+    private static Dictionary<int, string> Restore(ReadCache.Entry cached, MediaInfo info, string tmp)
+    {
+        var paths = new Dictionary<int, string>();
+        foreach (var t in info.Subs.Where(t => t.TextBased && cached.Tracks.ContainsKey(t.Index)))
+        {
+            paths[t.Index] = PyPath.Join(tmp, $"track{t.Index}.{t.Fmt}");
+            File.WriteAllBytes(paths[t.Index], cached.Tracks[t.Index]);
+        }
+        return paths;
     }
 
     private void FinishLoad(Item it)

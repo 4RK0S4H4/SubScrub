@@ -500,7 +500,7 @@ internal static class Tests
 
     /// <summary>Saves one video the way the Save button does (rewrite in place, best guess for uncertain lines).
     /// Returns the item's state and message ("told" when the save didn't start and only said why).</summary>
-    private static (string State, string Message) SaveOne(string path, Tools? tools = null)
+    private static (string State, string Message) SaveOne(string path, Tools? tools = null, bool review = false)
     {
         var settings = Path.Combine(Tmp, "settings-" + Guid.NewGuid().ToString("N") + ".json");
         var store = new FileStore(settings);
@@ -518,6 +518,16 @@ internal static class Tests
             s.Tools = tools;
         s.Add([path]);
         Check(s.WaitIdle(300), "reading finished");
+        if (s.Items[0].Marked != null)
+        {
+            if (!review)
+            {
+                s.Close();
+                return ("marked", s.Items[0].DoneText);
+            }
+            s.Review(s.Items[0].Uid, "changes");         // opening it in Review reads it for a clean by hand
+            Check(s.WaitIdle(300), "reading finished");
+        }
         var answers = new JsonObject();
         for (var k = 0; k < 8; k++)
         {
@@ -608,13 +618,16 @@ internal static class Tests
 
     public static void TestAwkwardFileNameWithoutMkvmerge()
     {
-        // as in test_edge.py: a copy of the file once saved, so FFmpeg's own path is used as well
+        // as in test_edge.py: a copy of the file once saved, so FFmpeg's own path is used as well. The copy carries
+        // SubScrub's mark, so it shows as Done; opened in Review it's read and saved again
         var p = EdgeCases()["It's & 100% [Rock] Café 🎬"];
         Check(SaveOne(p).State == "done");
         var copy = Path.Combine(NewDir("copy2"), Path.GetFileName(p));
         File.Copy(p, copy);
         p = copy;
-        var (state, msg) = SaveOne(p, new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe });
+        var ffmpegOnly = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe };
+        Check(SaveOne(p, ffmpegOnly) is ("marked", var why) && why.StartsWith("Already cleaned by SubScrub", StringComparison.Ordinal), "the saved copy is Done");
+        var (state, msg) = SaveOne(p, ffmpegOnly, review: true);
         Check(state is "done" or "skipped" or "asked", $"{state}: {msg}");
         Check(Leftovers(Path.GetDirectoryName(p)!).Count == 0);
     }
@@ -997,5 +1010,315 @@ internal static class Tests
         {
             s.Close();
         }
+    }
+
+    // ================================================================ reading with mkvextract, and the timing (#46)
+
+    /// <summary>When the first line of each subtitle track starts, measured from the start of the video.</summary>
+    private static List<double> SubtitleOffsets(string path)
+    {
+        string Probe(params string[] args)
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(ToolsFound.Ffprobe!) { RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var a in args)
+                info.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(info)!;
+            var o = p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+            return o;
+        }
+        double D(string x) => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        var video = D(Probe("-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "csv=p=0", path));
+        var subs = Probe("-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", path)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        return subs.Select(i => Math.Round(D(Probe("-v", "error", "-select_streams", i.Trim(), "-read_intervals", "%+#1",
+            "-show_entries", "packet=pts_time", "-of", "csv=p=0", path).Split('\n')[0]) - video, 3)).ToList();
+    }
+
+    public static void TestCleanedTrackKeepsItsTiming()
+    {
+        NeedTools();
+        var lib = Path.Combine(Root, "samples", "library");
+        if (!Directory.Exists(lib) || string.IsNullOrEmpty(ToolsFound.Mkvmerge))
+            throw new Skip("needs the sample library and MKVToolNix");
+        var source = Directory.EnumerateFiles(lib, "Dune*.mkv").First();      // starts at -0.128 s (encoder delay) as FFmpeg 6 sees it
+        var expected = SubtitleOffsets(source)[0];
+        foreach (var (label, tools) in new[] { ("mkvmerge", ToolsFound), ("ffmpeg", new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe }) })
+        {
+            var d = NewDir("timing-" + label);
+            var mkv = Path.Combine(d, Path.GetFileName(source));
+            File.Copy(source, mkv);
+            var info = Media.Probe(tools, mkv);
+            var track = info.Subs[0];
+            var doc = SubFormats.Load(Media.ExtractSubs(tools, info, [track], Path.Combine(d, "x"))[track.Index], track.Fmt);
+            Check(doc.Cues[0].Start == "00:00:04,000", $"{label}: read with the stored times, got {doc.Cues[0].Start}");
+            var text = Cleaner.CleanDoc(doc, new CleanOptions(), null).Render();
+            var res = Media.Save(tools, info, track, text, track.Fmt, new SaveOptions { Mode = "new", KeepOriginal = true });
+            var got = SubtitleOffsets(res.Path);
+            Check(got.All(o => Math.Abs(o - expected) < 0.002), $"{label}: the tracks start at {string.Join(", ", got)} s from the video, not {expected}");
+        }
+    }
+
+    public static void TestMkvextractAndFfmpegReadTheSameLines()
+    {
+        NeedTools();
+        if (string.IsNullOrEmpty(ToolsFound.Mkvextract))
+            throw new Skip("needs MKVToolNix");
+        var videos = new[] { "library", "edge" }.Select(x => Path.Combine(Root, "samples", x)).Where(Directory.Exists)
+            .SelectMany(x => Directory.EnumerateFiles(x, "*.mkv", SearchOption.AllDirectories))
+            .Append(Path.Combine(Root, "samples", "Sample (SDH test).mkv")).Where(File.Exists).ToList();
+        if (videos.Count < 5)
+            throw new Skip("run python -m tests.make_samples (--library, --edge) first");
+        var ffOnly = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe };
+        var tracks = 0;
+        foreach (var v in videos)
+        {
+            var info = Media.Probe(ToolsFound, v);
+            var a = Media.ExtractSubs(ToolsFound, info, info.Subs, NewDir("mx"));
+            var b = Media.ExtractSubs(ffOnly, info, info.Subs, NewDir("ff"));
+            Check(a.Keys.Order().SequenceEqual(b.Keys.Order()), $"{v}: the same tracks");
+            foreach (var t in info.Subs.Where(t => a.ContainsKey(t.Index)))
+            {
+                var (da, db) = (SubFormats.Load(a[t.Index], t.Fmt), SubFormats.Load(b[t.Index], t.Fmt));
+                Check(da.Cues.Select(c => (c.Start, c.End, c.Text)).SequenceEqual(db.Cues.Select(c => (c.Start, c.End, c.Text))),
+                      $"{Path.GetFileName(v)} track {t.Index}: the lines or times differ");
+                var (ca, cb) = (Cleaner.CleanDoc(da, new CleanOptions(), null), Cleaner.CleanDoc(db, new CleanOptions(), null));
+                Check(ca.Results.Select(r => (r.Text, r.Risk)).SequenceEqual(cb.Results.Select(r => (r.Text, r.Risk))),
+                      $"{Path.GetFileName(v)} track {t.Index}: cleaned differently");
+                tracks++;
+            }
+        }
+        Check(tracks >= 15, $"{tracks} tracks compared");
+    }
+
+    // ================================================================ reading two files at once (#47)
+
+    private static List<string> ReadAndLook(string lib, string name, bool ssd, out int mostAtOnce)
+    {
+        var dir = NewDir(name);
+        CopyDir(lib, dir);
+        CopyDir(Path.Combine(Root, "samples", "edge"), Path.Combine(dir, "edge"));
+        Media.DriveOf = _ => ("disk", ssd);
+        var s = new Session(new FileStore(Path.Combine(Tmp, name + ".json")));
+        s.Start("tests");
+        var most = 0;
+        var watch = new Thread(() =>
+        {
+            while (true)
+            {
+                int n;
+                lock (s.Lock)
+                    n = s.Items.Count(i => i.State is "probing" or "reading");
+                most = Math.Max(most, n);
+                if (s.Items.Count > 0 && !s.Items.Any(i => i.State is "queued" or "probing" or "reading"))
+                    return;
+                Thread.Sleep(2);
+            }
+        }) { IsBackground = true };
+        s.Add([dir]);
+        watch.Start();
+        Check(s.WaitIdle(300));
+        watch.Join(TimeSpan.FromSeconds(10));
+        mostAtOnce = most;
+        var views = new List<string> { s.FilesView().ToJsonString() };
+        foreach (var it in s.Items.ToList())
+            foreach (var show in new[] { "check", "changes", "all" })
+                views.Add(s.Review(it.Uid, show).ToJsonString());
+        s.Close();
+        return views.Select(v => NoUids(JsonNode.Parse(v.Replace(dir.Replace("\\", "\\\\"), "<dir>")))!.ToJsonString()).ToList();
+    }
+
+    public static void TestTwoReadsAtOnceGiveTheSameViews()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib) || !Directory.Exists(Path.Combine(Root, "samples", "edge")))
+            throw new Skip("run python -m tests.make_samples --library and --edge first");
+        var one = ReadAndLook(lib, "read-one", false, out var mostOne);
+        var two = ReadAndLook(lib, "read-two", true, out var mostTwo);
+        Check(mostOne == 1, $"a hard drive reads one file at a time ({mostOne})");
+        Check(mostTwo == 2, $"an SSD reads two at a time ({mostTwo})");
+        Check(one.Count == two.Count && one.Count > 20, "same number of views");
+        for (var i = 0; i < one.Count; i++)
+            Check(one[i] == two[i], $"view {i} differs");
+    }
+
+    // ================================================================ the read cache (#48)
+
+    private static (List<string> Views, List<string> Log) ReadOnce(string dir, string name)
+    {
+        var s = new Session(new FileStore(Path.Combine(Tmp, name + ".json")));
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var views = new List<string> { s.FilesView().ToJsonString() };
+        foreach (var it in s.Items.ToList())
+            foreach (var show in new[] { "check", "changes", "all" })
+                views.Add(s.Review(it.Uid, show).ToJsonString());
+        List<string> log;
+        lock (s.LogLines)
+            log = [.. s.LogLines];
+        s.Close();
+        return (views.Select(v => NoUids(JsonNode.Parse(v))!.ToJsonString()).ToList(), log);
+    }
+
+    public static void TestReadCacheGivesTheSameVerdictsAndReview()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run python -m tests.make_samples --library first");
+        var dir = NewDir("cache");
+        CopyDir(lib, dir);
+        ReadCache.Clear();
+        var (fresh, log1) = ReadOnce(dir, "cache-1");
+        Check(!log1.Any(l => l.Contains("read from the cache")), "the first read is fresh");
+        var (again, log2) = ReadOnce(dir, "cache-2");
+        var videos = Directory.EnumerateFiles(dir, "*.mkv").Count();
+        Check(log2.Count(l => l.Contains("read from the cache")) == videos, "every video came from the cache");
+        Check(!log2.Any(l => l.Contains("$ ") && (l.Contains("ffprobe") || l.Contains("mkvextract") || l.Contains("ffmpeg"))),
+              "no tool ran the second time");
+        Check(fresh.Count == again.Count, "same number of views");
+        for (var i = 0; i < fresh.Count; i++)
+            Check(fresh[i] == again[i], $"view {i} differs");
+        // a changed file is read again
+        var one = Directory.EnumerateFiles(dir, "*.mkv").First();
+        File.SetLastWriteTimeUtc(one, DateTime.UtcNow.AddMinutes(1));
+        var (_, log3) = ReadOnce(dir, "cache-3");
+        Check(log3.Count(l => l.Contains("read from the cache")) == videos - 1, "the changed file was read fresh");
+        // the cap: least recently used first
+        var before = ReadCache.Cap;
+        try
+        {
+            var sizes = new DirectoryInfo(ReadCache.Folder).GetFiles("*.bin").Sum(f => f.Length);
+            ReadCache.Cap = sizes / 2;
+            File.SetLastWriteTimeUtc(one, DateTime.UtcNow.AddMinutes(2));
+            ReadOnce(dir, "cache-4");
+            Check(new DirectoryInfo(ReadCache.Folder).GetFiles("*.bin").Sum(f => f.Length) <= ReadCache.Cap, "trimmed to the cap");
+        }
+        finally
+        {
+            ReadCache.Cap = before;
+        }
+        Check(ReadCache.Clear() > 0 && new DirectoryInfo(ReadCache.Folder).GetFiles().Length == 0, "Clear Cache empties it");
+    }
+
+    // ================================================================ flags and names only: mkvpropedit on a copy (#49)
+
+    private static (List<string> Tracks, List<string> Lines, List<string> Log) FlagsOnlySave(string source, string name, Tools tools, bool unchanged)
+    {
+        var d = NewDir(name);
+        var mkv = Path.Combine(d, Path.GetFileName(source));
+        File.Copy(source, mkv);
+        Media.SendToTrash = ToBin;
+        var info = Media.Probe(tools, mkv);
+        var track = info.Subs.First(t => !t.Default && !t.SdhFlagged && Media.LangShort(t.Language) == "en");
+        var doc = SubFormats.Load(Media.ExtractSubs(tools, info, [track], Path.Combine(Tmp, name + "-x"))[track.Index], track.Fmt);
+        var text = doc.Render(doc.Cues.Select(c => (string?)c.Text).ToList());
+        var log = new List<string>();
+        var res = Media.Save(tools, info, track, text, track.Fmt,
+                             new SaveOptions { Mode = "replace", TrackName = "English", TextUnchanged = unchanged }, log: log.Add);
+        Check(res.Path == mkv && Leftovers(d).Count == 0 && Directory.GetFiles(d).Length == 1, "one file, no leftovers");
+        var after = Media.Probe(ToolsFound, mkv);
+        var lines = new List<string>();
+        foreach (var (idx, path) in Media.ExtractSubs(ToolsFound, after, after.Subs, Path.Combine(Tmp, name + "-y")).OrderBy(kv => kv.Key))
+            lines.AddRange(SubFormats.Load(path).Cues.Select(c => $"{idx} {c.Start} {c.End} {c.Text}"));
+        var tracks = after.Streams.Select(x => $"{x["codec_type"]} {x["codec_name"]}")
+            .Concat(after.Subs.Select(t => $"{t.Language} {t.Title} default={t.Default} forced={t.Forced} hi={t.HearingImpaired} cleaned={t.Cleaned}"))
+            .Append($"chapters={after.Chapters} attachments={after.Count("attachment")}").ToList();
+        return (tracks, lines, log);
+    }
+
+    public static void TestFlagsOnlySaveMatchesARemux()
+    {
+        NeedTools();
+        var lib = Path.Combine(Root, "samples", "library");
+        if (string.IsNullOrEmpty(ToolsFound.Mkvpropedit) || !Directory.Exists(lib))
+            throw new Skip("needs MKVToolNix and the sample library");
+        var source = Directory.EnumerateFiles(lib, "Severance*.mkv").First();
+        var (t1, l1, log1) = FlagsOnlySave(source, "props-edit", ToolsFound, true);
+        Check(log1.Any(l => l.Contains("to change its track flags")) && !log1.Any(l => l.Contains("rewriting the file instead")), "mkvpropedit was used");
+        var (t2, l2, log2) = FlagsOnlySave(source, "props-remux", ToolsFound, false);
+        Check(!log2.Any(l => l.Contains("to change its track flags")), "the comparison is a remux");
+        Check(t1.SequenceEqual(t2), "the same tracks and flags:\n" + string.Join("\n", t1) + "\n--\n" + string.Join("\n", t2));
+        Check(l1.SequenceEqual(l2) && l1.Count > 100, "the same lines and times");
+        // mkvpropedit failing falls back to the remux
+        var broken = new Tools { Ffmpeg = ToolsFound.Ffmpeg, Ffprobe = ToolsFound.Ffprobe, Mkvmerge = ToolsFound.Mkvmerge,
+                                 Mkvextract = ToolsFound.Mkvextract, Mkvpropedit = Path.Combine(Tmp, "no-such-mkvpropedit") };
+        var (t3, l3, log3) = FlagsOnlySave(source, "props-broken", broken, true);
+        Check(log3.Any(l => l.Contains("rewriting the file instead")), "fell back to a remux");
+        Check(t3.SequenceEqual(t2) && l3.SequenceEqual(l2), "and saved the same file");
+    }
+
+    // ================================================================ TMDB answers kept between runs (#50)
+
+    public static void TestTmdbAnswersAreKeptBetweenRuns()
+    {
+        var key = "0123456789abcdef0123456789abcdef";
+        if (File.Exists(TmdbDiskCache.FilePath))
+            File.Delete(TmdbDiskCache.FilePath);
+        TmdbDiskCache.Reload();
+        var start = DateTimeOffset.UtcNow;
+        TmdbDiskCache.Now = () => start;
+        try
+        {
+            var calls = 0;
+            Tmdb Client() => new(key) { UseDiskCache = true, Opener = (_, _) => { calls++; return (200, "{\"results\": [{\"id\": 7}], \"id\": 7}"); } };
+            Client().SearchMovie("Dune");
+            Client().Movie(7);
+            Check(calls == 2, "asked TMDB the first time");
+            Check(!File.ReadAllText(TmdbDiskCache.FilePath).Contains(key), "the API key is never stored");
+            TmdbDiskCache.Reload();                                   // a new run
+            Check(Client().SearchMovie("Dune").Count == 1 && Client().Movie(7).Count > 0 && calls == 2, "the next run uses the kept answers");
+            TmdbDiskCache.Now = () => start.AddDays(8);
+            Client().SearchMovie("Dune");
+            Client().Movie(7);
+            Check(calls == 3, "searches are kept 7 days, details 30");
+            TmdbDiskCache.Now = () => start.AddDays(31);
+            Client().Movie(7);
+            Check(calls == 4, "details expire after 30 days");
+            Check(new Tmdb(key) { Opener = (_, _) => { calls++; return (200, "{\"results\": []}"); } }.SearchMovie("Dune").Count == 0 && calls == 5,
+                  "a test's own opener doesn't read the kept answers");
+        }
+        finally
+        {
+            TmdbDiskCache.Now = () => DateTimeOffset.UtcNow;
+            if (File.Exists(TmdbDiskCache.FilePath))
+                File.Delete(TmdbDiskCache.FilePath);
+            TmdbDiskCache.Reload();
+        }
+    }
+
+    // ================================================================ files SubScrub cleaned show as Done (#51)
+
+    public static void TestCleanedFilesShowAsDoneRightAway()
+    {
+        var lib = Path.Combine(Root, "samples", "library");
+        NeedTools();
+        if (!Directory.Exists(lib))
+            throw new Skip("run python -m tests.make_samples --library first");
+        var (_, first) = SaveAndLook(lib, "marked", true);
+        var dir = Path.Combine(Tmp, "marked");
+        var saved = first.Items.Where(i => i.State == "done" && PyPath.Suffix(i.Output!) == ".mkv" && i.DoneText.StartsWith("Cleaned track", StringComparison.Ordinal))
+            .Select(i => i.Output!).ToList();             // a file only renamed has no cleaned track, so no mark
+        first.Close();
+        Check(saved.Count >= 3, "videos were saved");
+        foreach (var v in saved)
+            Check(Media.Probe(ToolsFound, v).Subs.Any(t => t.CleanedBy == "tests"), $"{Path.GetFileName(v)} carries SUBSCRUB_CLEANED");
+        var s = new Session(new FileStore(Path.Combine(Tmp, "marked-again.json")));
+        s.Start("tests");
+        s.Add([dir]);
+        Check(s.WaitIdle(300));
+        var marked = s.Items.Where(i => saved.Contains(i.Path)).ToList();
+        Check(marked.Count == saved.Count && marked.All(i => i.State == "done" && i.Marked == "tests"), "every cleaned video is Done");
+        Check(marked.All(i => i.Docs.Count == 0), "and nothing was extracted or cleaned");
+        var row = s.FilesView()["rows"]!.AsArray().First(r => r!["uid"]!.GetValue<int>() == marked[0].Uid)!;
+        Check(row["badge"]?.GetValue<string>() == "Done" || row.ToJsonString().Contains("\"Done\""), row.ToJsonString());
+        Check(row.ToJsonString().Contains("Already cleaned by SubScrub tests"), row.ToJsonString());
+        // Review reads it, so it can be cleaned again by hand
+        s.Review(marked[0].Uid, "changes");
+        Check(s.WaitIdle(300));
+        Check(marked[0].State == "ready" && marked[0].Marked == null && marked[0].Docs.Count > 0, $"read for Review: {marked[0].State}");
+        s.Close();
     }
 }

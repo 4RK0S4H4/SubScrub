@@ -309,7 +309,7 @@ public sealed partial class Session
         var q = SaveQuestion(only, a);
         if (q["go"] is not JsonObject go)
             return q;
-        Thread? loader;
+        List<Thread> loaders;
         lock (Lock)
         {
             if (Busy())
@@ -321,9 +321,10 @@ public sealed partial class Session
             }
             _saving = true;                         // from here on nothing else starts reading files
             _loadCancel.Cancel();
-            loader = _loader;
+            loaders = _loads.Values.Select(l => l.Thread).ToList();
         }
-        loader?.Join(TimeSpan.FromSeconds(10));
+        foreach (var loader in loaders)
+            loader.Join(TimeSpan.FromSeconds(10));
         try
         {
             return StartBatch(go);
@@ -356,6 +357,7 @@ public sealed partial class Session
         public HashSet<string> Dropped = [];
         public string Policy = "";
         public string? NewName;
+        public bool ReadAnyway;
         public HashSet<string> Touched = [];             // files this save reads, replaces, removes or renames to
         public string Drive = "";
         public bool Ssd;
@@ -373,8 +375,7 @@ public sealed partial class Session
     {
         lock (Lock)
         {
-            _loader = null;
-            _loadingUid = null;
+            _loads.Clear();
             var single = Config.Truthy(go["single"]);
             var policy = go["policy"]!.GetValue<string>();
             var items = go["uids"]!.AsArray().Select(u => Item(u!.GetValue<int>())).Where(i => i != null).Select(i => i!).ToList();
@@ -395,7 +396,7 @@ public sealed partial class Session
                 {
                     Uid = i.Uid, Path = i.Path, Kind = i.Kind, Info = i.Info, Docs = i.Docs, SdhCounts = i.SdhCounts, Sel = i.Sel,
                     Manual = i.Manual, Opts = i.Opts, Overrides = new(i.Overrides), Force = i.Force || (single && i.Kind == "subtitle"),
-                    Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i),
+                    Sidecars = [.. i.Sidecars], Dropped = [.. i.Dropped], Policy = policy, NewName = NewName(i), ReadAnyway = i.ReadAnyway,
                     Touched = [.. FilesTouched(i).Append(i.Path).Append(NewName(i) is { Length: > 0 } nn ? PyPath.Join(PyPath.Dir(i.Path), nn) : "")
                         .Where(x => x.Length > 0).Select(PyPath.Key)],
                 });
@@ -646,6 +647,11 @@ public sealed partial class Session
                                         && (it.Info.Subs.Any(t => t.TextBased) || Media.FindSidecars(it.Path).Count > 0));
         if (fresh)
             BatchLoad(it, uid, prog, cancel);
+        if (fresh && !job.ReadAnyway && it.Info?.Subs.FirstOrDefault(t => t.CleanedBy.Length > 0) is { } mark)
+        {
+            TidyOrSkip(it, uid, null, $"already cleaned by SubScrub {mark.CleanedBy}", prog, cfg, cancel);
+            return;
+        }
         if (!it.Manual || it.Sel is not { } s || !it.Docs.ContainsKey(s))
             it.Sel = Batch.PickTrack(it, cfg.Pref);
         var track = it.Track();
@@ -695,7 +701,7 @@ public sealed partial class Session
         var opts = new SaveOptions
         {
             Mode = mode, KeepOriginal = keep, MakeDefault = cfg.Default, TrackName = cfg.Name, Language = track.Language,
-            OverwriteSidecar = cfg.Overwrite, RecycleSourceSub = cfg.Recycle,
+            OverwriteSidecar = cfg.Overwrite, RecycleSourceSub = cfg.Recycle, TextUnchanged = n == 0 && track.External.Length == 0,
             RecyclePaths = cfg.Recycle && it.Kind == "video" ? Batch.RemovableSidecars(it, cfg.Keep, mode) : [],
         };
         if (tidy != null)
@@ -774,9 +780,15 @@ public sealed partial class Session
         else
         {
             prog(-1, "Opening");
-            it.Info = Media.Probe(Tools, it.Path, Log);
+            var reader = ReadCache.Reader(Tools);
+            var cached = ReadCache.Get(it.Path, reader);
+            var probe = cached?.Probe ?? Media.ProbeText(Tools, it.Path, Log);
+            it.Info = Media.ParseProbe(it.Path, probe);
             tmpdir = Directory.CreateTempSubdirectory("subscrub_").FullName;
-            var paths = Media.ExtractSubs(Tools, it.Info, it.Info.Subs, tmpdir, (f, _) => prog(f, "Reading subtitles"), cancel, Log);
+            var paths = cached != null ? Restore(cached, it.Info, tmpdir)
+                : Media.ExtractSubs(Tools, it.Info, it.Info.Subs, tmpdir, (f, _) => prog(f, "Reading subtitles"), cancel, Log);
+            if (cached == null)
+                ReadCache.Put(it.Path, reader, probe, paths);
             (it.Docs, errors) = LoadDocs(it.Info, paths);
             Batch.AttachSidecars(it, Log);
         }

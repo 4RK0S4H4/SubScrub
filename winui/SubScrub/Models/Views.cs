@@ -16,6 +16,8 @@ public sealed class ToolsView
     public string Ffmpeg { get; set; } = "";
     public string Ffprobe { get; set; } = "";
     public string Mkvmerge { get; set; } = "";
+    public string Mkvextract { get; set; } = "";
+    public string Mkvpropedit { get; set; } = "";
     public bool Ready { get; set; }
 }
 

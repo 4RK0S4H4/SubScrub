@@ -216,6 +216,18 @@ checked against the old engine, side by side, on thousands of lines and over a h
 - **Installs over 3.x.** Same place, Start-menu entry and settings (your TMDB key stays). 3.x offers the update itself.
 - **Small extras.** The window opens where you left it. Tools shows each tool's version and can install FFmpeg and
   MKVToolNix for you with winget.
+- **Right-click in Explorer.** "Clean subtitles with SubScrub" on videos, subtitle files and folders. Several files
+  open in one window, and starting SubScrub again adds to the window that's already open.
+- **Faster.** Two files are read and saved at once on an SSD or across two drives. Files you've added before open
+  instantly (SubScrub remembers what it read; Tools → Clear Cache forgets it), and TMDB answers are kept for a week.
+  When only a track's name or flags change, the file is edited instead of rewritten. A smaller installer and a
+  quicker start.
+- **Already cleaned files show as Done.** SubScrub now marks the cleaned track inside each MKV it saves
+  (`SUBSCRUB_CLEANED=4.0.0`), so adding the file again shows it as Done right away. Open it in Review to clean it
+  again by hand.
+- **Safer and more exact.** SubScrub never deletes a file outright: if the Recycle Bin can't take a leftover
+  subtitle file, it stays in its folder and the save says so. Cleaned tracks now keep the original timing exactly
+  (on some videos they used to come out a fraction of a second late), and memory is given back after saving.
 
 ### 3.0.1
 

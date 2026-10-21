@@ -10,6 +10,8 @@ public sealed class Tools
     public string? Ffmpeg { get; set; }
     public string? Ffprobe { get; set; }
     public string? Mkvmerge { get; set; }
+    public string? Mkvextract { get; set; }         // MKVToolNix: reads subtitle tracks without demuxing the whole file
+    public string? Mkvpropedit { get; set; }        // MKVToolNix: changes track flags and names in place
 
     public bool Ready => !string.IsNullOrEmpty(Ffmpeg) && !string.IsNullOrEmpty(Ffprobe);
 }
@@ -32,6 +34,7 @@ public sealed class SubTrack
     public string External { get; set; } = "";      // a separate subtitle file next to the video ("" = inside it)
     public bool Cleaned { get; set; }               // a track SubScrub wrote on an earlier run (tagged SUBSCRUB=cleaned)
 
+    public string CleanedBy { get; set; } = "";     // SUBSCRUB_CLEANED: the version that cleaned it (4.0 on)
     public bool FromSubscrub => Cleaned || (Title ?? "").ToLowerInvariant().EndsWith("(dialogue only)", StringComparison.Ordinal);
 
     public bool TextBased => Media.TextCodecs.ContainsKey(Codec);
@@ -62,6 +65,7 @@ public sealed class MediaInfo
     public List<SubTrack> Subs { get; set; } = [];
     public string? Companion { get; set; }          // a standalone subtitle file: the video it belongs to
     public int Chapters { get; set; }
+    public double StartTime { get; set; }           // the container's first timestamp (negative after encoder delay)
 
     public string Name => PyPath.Name(Path);
 
@@ -83,6 +87,8 @@ public sealed class SaveOptions
     public string KeepLanguage { get; set; } = "eng";
     public string RenameTo { get; set; } = "";
     public List<string> RenameSidecars { get; set; } = [];
+    /// <summary>The cleaned text is the track's own, line for line: only its flags and name change (mkvpropedit).</summary>
+    public bool TextUnchanged { get; set; }
 
     /// <summary>dataclasses.replace(opts): the lists are shared, as in Python.</summary>
     public SaveOptions Copy() => (SaveOptions)MemberwiseClone();
