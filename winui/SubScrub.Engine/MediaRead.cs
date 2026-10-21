@@ -201,7 +201,11 @@ public static partial class Media
             var (_, stdout, _) = RunRaw([path, flag], TimeSpan.FromSeconds(10));
             var first = stdout.Length > 0 ? stdout.Split('\n')[0].TrimEnd('\r') : "";
             var m = VersionRe.Match(first);
-            return m.Success ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) : PyFmt.Head(first, 40);
+            if (!m.Success)
+                return PyFmt.Head(first, 40);
+            var v = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
+            // "9.0.2-essentials_build-www.gyan.dev" is just 9.0.2 (the rest crowded the Tools dialog)
+            return Regex.Match(v, @"\A\d+(?:\.\d+)+") is { Success: true } n ? n.Value : v;
         }
         catch (Exception)
         {
