@@ -205,6 +205,12 @@ it: remove the torrent afterwards (keep the files), or use *New File* to keep th
 
 ## What's new
 
+### 4.1
+
+- **Fixed: every file showed "Couldn't read this file".** On some PCs Windows refused to start FFmpeg (for example
+  the winget-installed one) because of the folder SubScrub was started from. The tools now start from a plain system
+  folder. A failed file also says why in its row.
+
 ### 4.0
 
 **SubScrub is now a native Windows app.** The window and the engine were rewritten in C# with WinUI 3, in the same S4

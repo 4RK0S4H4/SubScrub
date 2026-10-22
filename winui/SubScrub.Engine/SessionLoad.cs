@@ -438,9 +438,11 @@ public sealed partial class Session
             {
                 if (Item(uid) != null)
                 {
-                    Log($"Couldn't read {path}: {e.Message}");
+                    Log($"Couldn't read {path}: {e}");
+                    var why = e.Message.Split('\n')[0].Trim();
                     it.State = "failed";
-                    it.Message = "couldn't read this file";
+                    it.Message = why.Length == 0 ? "couldn't read this file"
+                        : $"couldn't read this file ({PyFmt.Head(why, 110)}: {e.GetType().Name})";
                     Changed(uid == ReviewUid);
                 }
             }
