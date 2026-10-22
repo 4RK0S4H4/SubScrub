@@ -225,6 +225,10 @@ public static partial class Media
         };
         foreach (var a in cmd.Skip(1))
             info.ArgumentList.Add(a);
+        // the tools inherit our folder otherwise; if that path crosses a junction Windows calls untrusted ("The path
+        // cannot be traversed because it contains an untrusted mount point"), WinGet's ffprobe link won't start
+        if (PyPath.IsWin)
+            info.WorkingDirectory = Environment.SystemDirectory;
         // like Python (PEP 538): in the plain C locale, tools get a UTF-8 one, or they mangle accented file names
         if (!PyPath.IsWin)
         {
