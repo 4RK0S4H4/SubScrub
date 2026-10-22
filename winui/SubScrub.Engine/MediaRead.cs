@@ -225,10 +225,6 @@ public static partial class Media
         };
         foreach (var a in cmd.Skip(1))
             info.ArgumentList.Add(a);
-        // the tools inherit our folder otherwise; if that path crosses a junction Windows calls untrusted ("The path
-        // cannot be traversed because it contains an untrusted mount point"), WinGet's ffprobe link won't start
-        if (PyPath.IsWin)
-            info.WorkingDirectory = Environment.SystemDirectory;
         // like Python (PEP 538): in the plain C locale, tools get a UTF-8 one, or they mangle accented file names
         if (!PyPath.IsWin)
         {
@@ -244,9 +240,26 @@ public static partial class Media
     public static string FmtCmd(IEnumerable<string> cmd) =>
         string.Join(" ", cmd.Select(c => c.Contains(' ') || c.Length == 0 ? $"\"{c}\"" : c));
 
+    /// <summary>Starts a tool. If Windows won't start it from our folder ("The path cannot be traversed because it
+    /// contains an untrusted mount point", seen with winget's FFmpeg link when the install folder sits behind a junction),
+    /// it is started from the system folder instead.</summary>
+    private static Process? StartProcess(IReadOnlyList<string> cmd)
+    {
+        var info = StartInfo(cmd);
+        try
+        {
+            return Process.Start(info);
+        }
+        catch (System.ComponentModel.Win32Exception) when (PyPath.IsWin)
+        {
+            info.WorkingDirectory = Environment.SystemDirectory;
+            return Process.Start(info);
+        }
+    }
+
     private static (int Code, string Stdout, string Stderr) RunRaw(IReadOnlyList<string> cmd, TimeSpan? timeout)
     {
-        using var p = Process.Start(StartInfo(cmd)) ?? throw new ToolError($"{PyPath.Name(cmd[0])} didn't start");
+        using var p = StartProcess(cmd) ?? throw new ToolError($"{PyPath.Name(cmd[0])} didn't start");
         p.StandardInput.Close();
         var so = p.StandardOutput.ReadToEndAsync();
         var se = p.StandardError.ReadToEndAsync();
@@ -294,7 +307,7 @@ public static partial class Media
                                          CancellationToken cancel = default, int[]? okCodes = null)
     {
         log?.Invoke("$ " + FmtCmd(cmd));
-        using var p = Process.Start(StartInfo(cmd)) ?? throw new ToolError($"{PyPath.Name(cmd[0])} didn't start");
+        using var p = StartProcess(cmd) ?? throw new ToolError($"{PyPath.Name(cmd[0])} didn't start");
         p.StandardInput.Close();
         var tail = new List<string>();
         var gate = new object();
