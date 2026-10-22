@@ -1,0 +1,61 @@
+{
+  "theme": "dark",
+  "asked": [
+    "decision",
+    "rewrite"
+  ],
+  "counts": {
+    "done": 6,
+    "skipped": 0,
+    "failed": 0,
+    "held": 0
+  },
+  "status": "Done: 6 saved.",
+  "outputs": [
+    "D:\\a\\_temp\\library-dark\\Blade Runner.mkv",
+    "D:\\a\\_temp\\library-dark\\Dune - Part Two.mkv",
+    "D:\\a\\_temp\\library-dark\\Planet Earth III S1 E2.mkv",
+    "D:\\a\\_temp\\library-dark\\Severance S2 E4.mkv",
+    "D:\\a\\_temp\\library-dark\\Slow Horses S4 E1.mkv",
+    "D:\\a\\_temp\\library-dark\\The Expanse S1 E3.mkv"
+  ],
+  "rows": [
+    {
+      "Name": "Blade Runner.mkv",
+      "State": "done",
+      "Detail": "Cleaned track saved into the video, renamed from Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv",
+      "Badge": "Saved"
+    },
+    {
+      "Name": "Dune - Part Two.mkv",
+      "State": "done",
+      "Detail": "Cleaned track saved into the video, renamed from Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv",
+      "Badge": "Saved"
+    },
+    {
+      "Name": "Planet Earth III S1 E2.mkv",
+      "State": "done",
+      "Detail": "Renamed from Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv",
+      "Badge": "Saved"
+    },
+    {
+      "Name": "Severance S2 E4.mkv",
+      "State": "done",
+      "Detail": "Cleaned track saved into the video, renamed from Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv",
+      "Badge": "Saved"
+    },
+    {
+      "Name": "Slow Horses S4 E1.mkv",
+      "State": "done",
+      "Detail": "Cleaned track saved into the video, renamed from Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv",
+      "Badge": "Saved"
+    },
+    {
+      "Name": "The Expanse S1 E3.mkv",
+      "State": "done",
+      "Detail": "Cleaned track saved into the video, renamed from The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv",
+      "Badge": "Saved"
+    }
+  ],
+  "library": "D:\\a\\_temp\\library-dark"
+}

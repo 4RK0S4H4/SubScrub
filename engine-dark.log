@@ -1,0 +1,208 @@
+01:11:22  SubScrub 4.1.0 (engine). FFmpeg: C:\ProgramData\Chocolatey\bin\ffmpeg.exe; MKVToolNix: C:\Program Files\MKVToolNix\mkvmerge.exe
+01:11:25  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv
+01:11:25  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_45t2jhm4.tkj\track2.srt
+01:11:25  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_45t2jhm4.tkj\track2.srt'. Container format: SRT text subtitles
+01:11:25  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_oyxyssse.al3\track2.srt'. Container format: SRT text subtitles
+01:11:25  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv
+01:11:26  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark\Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_td3wp0sx.zqd\track2.srt
+01:11:26  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track2.srt 3:C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track3.srt 4:C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track4.srt 5:C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track5.srt
+01:11:26  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_td3wp0sx.zqd\track2.srt'. Container format: SRT text subtitles
+01:11:26  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv
+01:11:26  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track2.srt'. Container format: SRT text subtitles
+Extracting track 3 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track3.srt'. Container format: SRT text subtitles
+Extracting track 4 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track4.srt'. Container format: SRT text subtitles
+Extracting track 5 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_hzkwmftu.yl1\track5.srt'. Container format: SRT text subtitles
+01:11:26  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv
+01:11:26  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_xwg0yrjb.umo\track2.srt
+01:11:26  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track2.srt 3:C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track3.srt 4:C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track4.srt
+01:11:26  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_xwg0yrjb.umo\track2.srt'. Container format: SRT text subtitles
+01:11:26  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track2.srt'. Container format: SRT text subtitles
+Extracting track 3 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track3.srt'. Container format: SRT text subtitles
+Extracting track 4 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_3xpuzc4v.b2y\track4.srt'. Container format: SRT text subtitles
+01:11:50  Saving 6 file(s): video mode=replace, subtitle mode=embed, keep SDH=False, default=True, uncertain lines=guess
+01:11:50  Saving up to 2 files at a time
+01:11:50  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv
+01:11:50  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_5mpvwiei.1ji\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_5mpvwiei.1ji\cleaned.srt --track-order 0:0,0:1,1:0
+01:11:51  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_5mpvwiei.1ji\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_5mpvwiei.1ji\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:11:51  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv
+01:11:51  Verified Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 7013.8s, 1315 cleaned lines.
+01:11:51  Original moved to the Recycle Bin.
+01:11:51  Saved D:\a\_temp\library-dark\Blade Runner.mkv: 1130 lines cleaned. Original moved to the Recycle Bin.
+01:11:50  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv
+01:11:50  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fbkger45.2zv\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fbkger45.2zv\cleaned.srt --track-order 0:0,0:1,1:0
+01:11:51  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fbkger45.2zv\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fbkger45.2zv\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:11:51  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv
+01:11:51  Verified Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 9955.1s, 1683 cleaned lines.
+01:11:51  Original moved to the Recycle Bin.
+01:11:51  Saved D:\a\_temp\library-dark\Dune - Part Two.mkv: 1405 lines cleaned. Original moved to the Recycle Bin.
+01:11:51  Renamed Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv -> Planet Earth III S1 E2.mkv
+01:11:51  Saved D:\a\_temp\library-dark\Planet Earth III S1 E2.mkv: 0 lines cleaned. Renamed.
+01:11:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv
+01:11:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv --subtitle-tracks 3 --default-track-flag 3:0 D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_txpeu3ls.ubz\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_txpeu3ls.ubz\cleaned.srt --track-order 0:0,0:1,1:0,0:3
+01:11:52  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_txpeu3ls.ubz\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 1: Using the output module for the format 'AAC'.
+'D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 3: Using the output module for the format 'text subtitles'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_txpeu3ls.ubz\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:11:52  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv
+01:11:52  Verified Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv: 1 video, 1 audio, 2 subtitle tracks, 0 attachments, 0 chapters, 3118.1s, 756 cleaned lines.
+01:11:52  Original moved to the Recycle Bin.
+01:11:52  Saved D:\a\_temp\library-dark\Severance S2 E4.mkv: 124 lines cleaned. Original moved to the Recycle Bin.
+01:11:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv
+01:11:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ofqotzqo.2o2\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ofqotzqo.2o2\cleaned.srt --track-order 0:0,0:1,1:0
+01:11:51  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ofqotzqo.2o2\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ofqotzqo.2o2\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:11:51  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv
+01:11:52  Verified Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 2852.1s, 681 cleaned lines.
+01:11:52  Original moved to the Recycle Bin.
+01:11:52  Renamed Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.eng.sdh.srt -> Slow Horses S4 E1.eng.sdh.srt
+01:11:52  Saved D:\a\_temp\library-dark\Slow Horses S4 E1.mkv: 108 lines cleaned. Original moved to the Recycle Bin. “Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.eng.sdh.srt” renamed to match.
+01:11:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv
+01:11:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv --subtitle-tracks 3 --default-track-flag 3:0 D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_a5cdvu3g.4ft\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_a5cdvu3g.4ft\cleaned.srt --track-order 0:0,0:1,1:0,0:3
+01:11:52  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_a5cdvu3g.4ft\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 1: Using the output module for the format 'AAC'.
+'D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 3: Using the output module for the format 'text subtitles'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_a5cdvu3g.4ft\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:11:52  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv
+01:11:52  Verified The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv: 1 video, 1 audio, 2 subtitle tracks, 0 attachments, 0 chapters, 2947.8s, 698 cleaned lines.
+01:11:52  Original moved to the Recycle Bin.
+01:11:52  Saved D:\a\_temp\library-dark\The Expanse S1 E3.mkv: 109 lines cleaned. Original moved to the Recycle Bin.
+01:12:28  SubScrub 4.1.0 (engine). FFmpeg: C:\ProgramData\Chocolatey\bin\ffmpeg.exe; MKVToolNix: C:\Program Files\MKVToolNix\mkvmerge.exe
+01:12:31  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv
+01:12:31  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_o5mgvqan.n3i\track2.srt
+01:12:31  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_gj21xp4m.ojq\track2.srt
+01:12:31  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_gj21xp4m.ojq\track2.srt'. Container format: SRT text subtitles
+01:12:31  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_o5mgvqan.n3i\track2.srt'. Container format: SRT text subtitles
+01:12:31  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv
+01:12:31  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv
+01:12:31  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_plwa1ecq.co0\track2.srt
+01:12:31  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track2.srt 3:C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track3.srt 4:C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track4.srt 5:C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track5.srt
+01:12:31  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_plwa1ecq.co0\track2.srt'. Container format: SRT text subtitles
+01:12:31  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv
+01:12:32  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track2.srt'. Container format: SRT text subtitles
+Extracting track 3 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track3.srt'. Container format: SRT text subtitles
+Extracting track 4 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track4.srt'. Container format: SRT text subtitles
+Extracting track 5 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_omfmlquy.t5d\track5.srt'. Container format: SRT text subtitles
+01:12:32  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_hj4gqetm.s2l\track2.srt
+01:12:32  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv
+01:12:32  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_hj4gqetm.s2l\track2.srt'. Container format: SRT text subtitles
+01:12:32  $ "C:\Program Files\MKVToolNix\mkvextract.exe" --gui-mode D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv tracks 2:C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track2.srt 3:C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track3.srt 4:C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track4.srt
+01:12:32  Extracting track 2 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track2.srt'. Container format: SRT text subtitles
+Extracting track 3 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track3.srt'. Container format: SRT text subtitles
+Extracting track 4 with the CodecID 'S_TEXT/UTF8' to the file 'C:\Users\runneradmin\AppData\Local\Temp\subscrub_0um2ghro.1hd\track4.srt'. Container format: SRT text subtitles
+01:12:51  Saving 6 file(s): video mode=replace, subtitle mode=embed, keep SDH=False, default=True, uncertain lines=guess
+01:12:51  Saving up to 2 files at a time
+01:12:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv
+01:12:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ekhnpyyb.l0b\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ekhnpyyb.l0b\cleaned.srt --track-order 0:0,0:1,1:0
+01:12:52  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ekhnpyyb.l0b\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_ekhnpyyb.l0b\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:12:52  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv
+01:12:52  Verified Blade.Runner.1982.The.Final.Cut.1080p.BluRay.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 7013.8s, 1315 cleaned lines.
+01:12:52  Original moved to the Recycle Bin.
+01:12:52  Saved D:\a\_temp\library-dark-1000x680\Blade Runner.mkv: 1130 lines cleaned. Original moved to the Recycle Bin.
+01:12:51  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv
+01:12:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_cjqcpet2.ceh\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_cjqcpet2.ceh\cleaned.srt --track-order 0:0,0:1,1:0
+01:12:52  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_cjqcpet2.ceh\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_cjqcpet2.ceh\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 1 second.
+01:12:52  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv
+01:12:52  Verified Dune.Part.Two.2024.2160p.UHD.BluRay.x265.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 9955.1s, 1683 cleaned lines.
+01:12:52  Original moved to the Recycle Bin.
+01:12:52  Saved D:\a\_temp\library-dark-1000x680\Dune - Part Two.mkv: 1405 lines cleaned. Original moved to the Recycle Bin.
+01:12:52  Renamed Planet.Earth.III.S01E02.Ocean.2160p.iP.WEB-DL.mkv -> Planet Earth III S1 E2.mkv
+01:12:52  Saved D:\a\_temp\library-dark-1000x680\Planet Earth III S1 E2.mkv: 0 lines cleaned. Renamed.
+01:12:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv
+01:12:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv --subtitle-tracks 3 --default-track-flag 3:0 D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_22pxr0vc.dbf\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_22pxr0vc.dbf\cleaned.srt --track-order 0:0,0:1,1:0,0:3
+01:12:53  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_22pxr0vc.dbf\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 1: Using the output module for the format 'AAC'.
+'D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv' track 3: Using the output module for the format 'text subtitles'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_22pxr0vc.dbf\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:12:53  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv
+01:12:53  Verified Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.subscrub-tmp.mkv: 1 video, 1 audio, 2 subtitle tracks, 0 attachments, 0 chapters, 3118.1s, 756 cleaned lines.
+01:12:53  Original moved to the Recycle Bin.
+01:12:53  Saved D:\a\_temp\library-dark-1000x680\Severance S2 E4.mkv: 124 lines cleaned. Original moved to the Recycle Bin.
+01:12:52  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv
+01:12:53  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv --no-subtitles D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_u15msh14.0bg\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_u15msh14.0bg\cleaned.srt --track-order 0:0,0:1,1:0
+01:12:53  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_u15msh14.0bg\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.mkv' track 1: Using the output module for the format 'AAC'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_u15msh14.0bg\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:12:53  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv
+01:12:53  Verified Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.subscrub-tmp.mkv: 1 video, 1 audio, 1 subtitle tracks, 0 attachments, 0 chapters, 2852.1s, 681 cleaned lines.
+01:12:53  Original moved to the Recycle Bin.
+01:12:53  Renamed Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.eng.sdh.srt -> Slow Horses S4 E1.eng.sdh.srt
+01:12:53  Saved D:\a\_temp\library-dark-1000x680\Slow Horses S4 E1.mkv: 108 lines cleaned. Original moved to the Recycle Bin. “Slow.Horses.S04E01.Identity.Theft.1080p.ATVP.WEB-DL.eng.sdh.srt” renamed to match.
+01:12:53  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" -J D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv
+01:12:53  $ "C:\Program Files\MKVToolNix\mkvmerge.exe" --gui-mode --output-charset UTF-8 -o D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv --subtitle-tracks 3 --default-track-flag 3:0 D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv --language 0:eng --track-name 0:English --default-track-flag 0:1 --hearing-impaired-flag 0:0 --sub-charset 0:UTF-8 --tags 0:C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fzdjvdue.4st\tags.xml C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fzdjvdue.4st\cleaned.srt --track-order 0:0,0:1,1:0,0:3
+01:12:53  mkvmerge v103.0 ('The Darkness') 64-bit
+'D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv': Using the demultiplexer for the format 'Matroska'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fzdjvdue.4st\cleaned.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 0: Using the output module for the format 'AVC/H.264'.
+'D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 1: Using the output module for the format 'AAC'.
+'D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.mkv' track 3: Using the output module for the format 'text subtitles'.
+'C:\Users\runneradmin\AppData\Local\Temp\subscrub_mux_fzdjvdue.4st\cleaned.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv' has been opened for writing.
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.
+01:12:53  $ C:\ProgramData\Chocolatey\bin\ffprobe.exe -v error -print_format json -show_format -show_streams -show_chapters D:\a\_temp\library-dark-1000x680\The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv
+01:12:53  Verified The.Expanse.S01E03.Remember.the.Cant.1080p.BluRay.x264.subscrub-tmp.mkv: 1 video, 1 audio, 2 subtitle tracks, 0 attachments, 0 chapters, 2947.8s, 698 cleaned lines.
+01:12:53  Original moved to the Recycle Bin.
+01:12:53  Saved D:\a\_temp\library-dark-1000x680\The Expanse S1 E3.mkv: 109 lines cleaned. Original moved to the Recycle Bin.

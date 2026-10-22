@@ -1,0 +1,14 @@
+Start to the engine ready: 0.42 s
+Start to the first frame: 0.40 s
+Memory at start: 104 MB working set, 40 MB private, 1 MB managed
+Add the sample library and read it all: 1.1 s (6 files)
+Memory with the library read: 176 MB working set, 92 MB private, 8 MB managed
+Open Review (Severance.S02E04.Woes.Hollow.2160p.ATVP.WEB-DL.DDP5.1.mkv): 51 ms
+Switch to Changes: 19 ms (125 lines)
+Keep Original on one line: 11 ms
+Settings, first open (builds the dialog): 17 ms
+Settings, open again: 6 ms
+Settings, open again: 6 ms
+Save everything: 4.3 s (questions: decision, rewrite)
+Memory right after saving: 256 MB working set, 159 MB private, 4 MB managed
+Memory at the end: 261 MB working set, 164 MB private, 7 MB managed
